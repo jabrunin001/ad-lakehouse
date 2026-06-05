@@ -8,9 +8,9 @@ FROM iceberg.gold.campaign_pacing p
 JOIN latest l ON p.campaign_id = l.campaign_id AND p.pacing_date = l.d
 ORDER BY p.pace_index DESC;
 
--- Fill rate by placement
+-- Fill rate by placement (nullif guard mirrors gold_fill.py's requests=0 -> NULL)
 SELECT placement, sum(requests) AS requests, sum(impressions) AS impressions,
-       round(sum(impressions) * 1.0 / sum(requests), 3) AS fill_rate
+       round(sum(impressions) * 1.0 / nullif(sum(requests), 0), 3) AS fill_rate
 FROM iceberg.gold.inventory_fill
 GROUP BY placement ORDER BY fill_rate DESC;
 

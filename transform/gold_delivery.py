@@ -37,4 +37,5 @@ def build(spark: SparkSession) -> None:
     )
     # Read-back count: this is a CTAS, so query the persisted table to log what landed.
     n = spark.sql("SELECT count(*) AS c FROM lh.gold.fact_impression_delivery").collect()[0]["c"]
+    assert n > 0, "[gold_delivery] no rows written — is silver.fact_event populated?"
     print(f"[gold_delivery] wrote {n} impression rows")

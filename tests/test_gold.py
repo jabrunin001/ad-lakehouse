@@ -33,7 +33,9 @@ def test_quartile_completion_is_nested():
 
 
 @pytest.mark.integration
-def test_fill_rate_is_a_fraction():
+def test_fill_rate_is_non_negative():
+    # per-bucket fill_rate can exceed 1 (impression in a different hour than its
+    # ad_request), so we only assert non-negativity; the overall rate ~fill_prob.
     (bad,) = _trino(
         "SELECT count(*) FROM iceberg.gold.inventory_fill "
         "WHERE fill_rate IS NOT NULL AND fill_rate < 0"
