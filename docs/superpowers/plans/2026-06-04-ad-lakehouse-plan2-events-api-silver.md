@@ -330,27 +330,40 @@ Expected: clean.
 
 - [ ] **Step 3: Reset bronze so the medallion is built on clean correlated data**
 
-The running stream and existing bronze hold Plan 1's independent events. Stop the stream, drop the table, clear the checkpoint, then restart and re-seed:
+The running stream, the existing bronze table, AND the Kafka topic all hold Plan 1's
+independent events — purge all three or old events leak back into the rebuilt bronze.
 
 ```bash
-# stop any running streaming job
+# 1. stop the running streaming job
 docker compose exec -T spark bash -lc "pkill -f ingest_bronze || true"
-# drop the bronze table + clear checkpoint
+
+# 2. drop the bronze table (throwaway script; do NOT commit it)
+cat > scripts/_reset_bronze.py <<'PY'
+import sys; sys.path.insert(0, "/opt/app")
+from streaming.spark_session import build_spark
+s = build_spark("reset"); s.sql("DROP TABLE IF EXISTS lh.bronze.ad_events_raw"); print("DROPPED"); s.stop()
+PY
 docker compose exec -T -e PYTHONPATH=/opt/app spark /opt/spark/bin/spark-submit \
   --conf spark.jars.ivy=/tmp/.ivy2 \
   --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
-  -c "from streaming.spark_session import build_spark; s=build_spark('reset'); s.sql('DROP TABLE IF EXISTS lh.bronze.ad_events_raw'); print('dropped')" 2>&1 | tail -2 \
-  || docker compose exec -T spark bash -lc "cd /opt/app && PYTHONPATH=/opt/app python3 -c \"from streaming.spark_session import build_spark; s=build_spark('reset'); s.sql('DROP TABLE IF EXISTS lh.bronze.ad_events_raw'); print('dropped')\""
+  /opt/app/scripts/_reset_bronze.py 2>&1 | tail -2   # expect: DROPPED
+
+# 3. delete AND recreate the Kafka topic (empty). RECREATE IS REQUIRED:
+#    Redpanda does NOT auto-create a topic for a *consumer*, so if the stream
+#    starts against a missing topic it crashes with UnknownTopicOrPartition.
+docker compose exec -T redpanda rpk topic delete ad_events || true
+docker compose exec -T redpanda rpk topic create ad_events
+
+# 4. clear the streaming checkpoint
 rm -rf .checkpoints/bronze_ad_events
 ```
-Note: `spark-submit -c "<code>"` may not accept inline code on all builds; the `||` fallback runs the same drop via `python3 -c` inside the container. Either path must print `dropped`. Report which worked.
 
 - [ ] **Step 4: Restart the stream and seed correlated events**
 
 ```bash
 make stream
-sleep 30
-make seed            # 10000 requests -> ~ many correlated events
+sleep 35              # let the streaming job initialize on the (empty) topic
+make seed            # 10000 requests -> ~3x correlated events
 ```
 
 - [ ] **Step 5: Verify correlation landed in bronze (via Trino)**
@@ -820,13 +833,14 @@ SELECT
 Add a `build-silver` target (and keep existing ones). The new recipe (tab-indented like `stream`):
 
 ```makefile
+topic: ; docker compose exec -T redpanda rpk topic create ad_events --topic-config retention.ms=-1 || true
 build-silver: ; docker compose exec -T -e PYTHONPATH=/opt/app spark /opt/spark/bin/spark-submit \
 	--conf spark.jars.ivy=/tmp/.ivy2 \
 	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
 	/opt/app/transform/run.py silver
 silver-checks: ; docker compose exec -T trino trino --catalog iceberg < trino/01_silver_checks.sql
 ```
-Also add `build-silver` and `silver-checks` to the `.PHONY` line. Run `make -n build-silver` to confirm the recipe assembles with all flags + the `silver` arg.
+Also add `topic`, `build-silver`, `silver-checks` to the `.PHONY` line. The `topic` target exists because Redpanda does not auto-create a topic for a consumer — a fresh `make up` then `make stream` would otherwise crash the stream on a missing topic. Run `make -n build-silver` to confirm the recipe assembles with all flags + the `silver` arg.
 
 - [ ] **Step 4: Run the full silver build end-to-end via the driver**
 
@@ -899,12 +913,16 @@ Expected: all green, ruff clean. Report counts.
 
 - [ ] **Step 7: Update `README.md` roadmap**
 
-In the Roadmap table, change Plan 2 status to `✅ done` and add silver/API to the "what runs today" description and repo tour (mention `api/`, `transform/`, `silver.*`). Add to the quickstart, after `make seed`:
+In the Roadmap table, change Plan 2 status to `✅ done` and add silver/API to the "what runs today" description and repo tour (mention `api/`, `transform/`, `silver.*`). Update the quickstart so it includes `make topic` BEFORE `make stream` (Redpanda doesn't auto-create the topic for a consumer), and add the silver steps after `make seed`:
 ```
+make up
+make topic          # create the ad_events topic (required before the consumer starts)
+make stream         # Structured Streaming Kafka -> bronze
+make seed           # produce correlated ad events
 make build-silver   # build silver.dim_campaign (from the API) + deduped silver.fact_event
 make silver-checks  # dedup + campaign-join sanity via Trino
 ```
-(Add a line noting the `api` service is on http://localhost:8000.)
+(Also note the `api` service is on http://localhost:8000.)
 
 - [ ] **Step 8: Commit**
 
