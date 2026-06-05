@@ -22,11 +22,16 @@ def build(spark: SparkSession) -> None:
                request_id, user_id, device, geo, placement
         FROM (
           SELECT *,
+                 -- earliest ingest_ts wins; ties on (event_id, ingest_ts) resolve
+                 -- arbitrarily, which is safe since a Kafka redelivery carries the
+                 -- same field values. Don't add kafka_ts as a tiebreaker — unneeded.
                  row_number() OVER (PARTITION BY event_id ORDER BY ingest_ts ASC) AS rn
           FROM lh.bronze.ad_events_raw
           WHERE event_id IS NOT NULL
         ) WHERE rn = 1
         """
     )
+    # Read-back count: unlike dim_campaign (where the row count is known before the
+    # write), this is a CTAS, so we query the persisted table to confirm what landed.
     n = spark.sql("SELECT count(*) AS c FROM lh.silver.fact_event").collect()[0]["c"]
     print(f"[fact_event] wrote {n} deduped events")
