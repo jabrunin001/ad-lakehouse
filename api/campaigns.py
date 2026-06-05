@@ -11,11 +11,14 @@ N_CAMPAIGNS = 20
 
 
 class Campaign(BaseModel):
+    # The silver/gold join to events is on campaign_id only. target_geo and
+    # target_device describe what the campaign *targets* (campaign attributes),
+    # they are NOT join keys to AdEvent.geo / AdEvent.device.
     campaign_id: str
-    budget: int          # total impression budget over the flight
+    budget: int          # total impression budget over the flight (a count of impressions)
     flight_start: date
     flight_end: date
-    daily_budget: float
+    daily_budget: float  # budget spread evenly over the flight days
     target_geo: str
     target_device: str
 

@@ -24,3 +24,14 @@ def test_deterministic():
 
 def test_is_campaign_instances():
     assert all(isinstance(c, Campaign) for c in build_campaigns(REF))
+
+def test_pinned_values_cmp001():
+    # Pin a known-seed campaign so a future change to the draw order or RNG
+    # (which would silently shift the campaign metadata events join against)
+    # fails loudly instead of corrupting downstream pacing.
+    c = build_campaigns(REF)[0]
+    assert c.campaign_id == "cmp-001"
+    assert c.budget == 483_000
+    assert c.target_geo == "US-CA"
+    assert c.target_device == "desktop"
+    assert (c.flight_end - c.flight_start).days == 17
