@@ -34,3 +34,14 @@ def test_late_events_are_backdated():
                               seed=3, fill_prob=0.7))
     late = [e for e in events if e.event_ts < NOW - timedelta(minutes=1)]
     assert 0.03 <= len(late) / len(events) <= 0.07
+
+def test_spread_distributes_events_over_multiple_days():
+    events = list(event_batch(n_requests=3000, now=NOW, dup_rate=0.0, late_rate=0.0,
+                              seed=4, fill_prob=0.5, spread_days=10))
+    days = {e.event_ts.date() for e in events}
+    assert len(days) >= 5  # events span many distinct days, not one spike
+
+def test_spread_zero_keeps_single_day():
+    events = list(event_batch(n_requests=500, now=NOW, dup_rate=0.0, late_rate=0.0,
+                              seed=5, fill_prob=0.0, spread_days=0))
+    assert {e.event_ts.date() for e in events} == {NOW.date()}
