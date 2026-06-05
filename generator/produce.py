@@ -14,7 +14,8 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=10_000, help="number of ad requests")
     ap.add_argument("--dup-rate", type=float, default=0.02)
     ap.add_argument("--late-rate", type=float, default=0.05)
-    ap.add_argument("--fill-prob", type=float, default=0.7)
+    ap.add_argument("--fill-prob", type=float, default=0.7,
+                    help="fraction of ad requests that produce an impression (0-1)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
