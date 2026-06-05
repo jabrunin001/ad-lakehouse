@@ -14,5 +14,5 @@ with DAG(
     catchup=False,
     default_args=DEFAULT_ARGS,
     tags=["ad-lakehouse", "maintenance"],
-):
+) as dag:
     BashOperator(task_id="maintain_tables", bash_command=spark_submit("maintenance"))

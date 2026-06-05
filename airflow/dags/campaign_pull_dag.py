@@ -14,5 +14,5 @@ with DAG(
     catchup=False,
     default_args=DEFAULT_ARGS,
     tags=["ad-lakehouse", "silver"],
-):
+) as dag:
     BashOperator(task_id="pull_dim_campaign", bash_command=spark_submit("dim_campaign"))

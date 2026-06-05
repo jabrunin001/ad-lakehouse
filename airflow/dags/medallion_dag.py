@@ -14,7 +14,7 @@ with DAG(
     catchup=False,
     default_args=DEFAULT_ARGS,
     tags=["ad-lakehouse", "silver", "gold"],
-):
+) as dag:
     build_silver = BashOperator(task_id="build_silver", bash_command=spark_submit("silver"))
     build_gold = BashOperator(task_id="build_gold", bash_command=spark_submit("gold"))
     build_silver >> build_gold
