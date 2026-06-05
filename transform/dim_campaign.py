@@ -38,4 +38,4 @@ def build(spark: SparkSession) -> None:
         "target_device",
     )
     df.writeTo("lh.silver.dim_campaign").using("iceberg").createOrReplace()
-    print(f"[dim_campaign] wrote {df.count()} campaigns")
+    print(f"[dim_campaign] wrote {len(rows)} campaigns")  # len(rows): avoid a redundant count() Spark job
