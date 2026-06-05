@@ -15,7 +15,7 @@ class Campaign(BaseModel):
     # target_device describe what the campaign *targets* (campaign attributes),
     # they are NOT join keys to AdEvent.geo / AdEvent.device.
     campaign_id: str
-    budget: int          # total impression budget over the flight (a count of impressions)
+    budget: int          # total impression budget over the flight, sized to demo volume
     flight_start: date
     flight_end: date
     daily_budget: float  # budget spread evenly over the flight days
@@ -31,7 +31,10 @@ def build_campaigns(reference: date) -> list[Campaign]:
         r = random.Random(i)
         start = reference - timedelta(days=r.randint(3, 12))
         end = reference + timedelta(days=r.randint(3, 12))
-        budget = r.randint(50, 500) * 1000
+        # Budget is in impressions. Scaled to the demo's synthetic delivery volume
+        # (~350 impressions/campaign at the default 10k-request seed) so pace labels
+        # vary. Real campaigns would scale budget with real traffic.
+        budget = r.randint(300, 1500)
         days = (end - start).days
         campaigns.append(
             Campaign(
