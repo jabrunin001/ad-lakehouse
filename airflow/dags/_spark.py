@@ -15,6 +15,8 @@ DEFAULT_ARGS = {
 }
 
 SPARK_CONTAINER = "ad-lakehouse-spark"
+# Mirrors streaming/spark_session.ICEBERG_PKGS (the canonical list) — they must
+# stay in sync; this file can't import the app package across the container boundary.
 PACKAGES = (
     "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,"
     "org.apache.iceberg:iceberg-aws-bundle:1.8.1,"

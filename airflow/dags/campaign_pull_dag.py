@@ -6,6 +6,9 @@ from airflow.operators.bash import BashOperator
 
 from _spark import DEFAULT_ARGS, spark_submit
 
+# Rebuilds silver.dim_campaign on its own (@daily) cadence — distinct from
+# medallion_build, which also rebuilds it. Both are idempotent createOrReplace;
+# this DAG models campaign metadata as an independently-scheduled concern.
 with DAG(
     dag_id="campaign_pull",
     description="Pull campaign metadata from the FastAPI service into silver.dim_campaign",

@@ -35,3 +35,17 @@ def test_three_dag_files_present():
     assert {p.stem for p in DAG_FILES} == {
         "campaign_pull_dag", "medallion_dag", "maintenance_dag",
     }
+
+
+def test_medallion_builds_silver_before_gold():
+    # The dependency direction is the one piece of real logic in the DAG layer;
+    # a typo could silently invert it, so assert it explicitly.
+    pytest.importorskip("airflow")
+    from airflow.models import DAG
+
+    path = DAGS_DIR / "medallion_dag.py"
+    spec = importlib.util.spec_from_file_location("medallion_dag", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    dag = next(v for v in vars(module).values() if isinstance(v, DAG))
+    assert "build_gold" in dag.get_task("build_silver").downstream_task_ids
