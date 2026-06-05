@@ -8,6 +8,11 @@ def build(spark: SparkSession) -> None:
     expected pace (budget * elapsed-flight-fraction), pace_index = cumulative /
     expected, and an ahead|on_track|behind label. The dim_campaign join is what
     makes this product exist. CREATE OR REPLACE = idempotent.
+
+    `as_of` is the latest IMPRESSION date (delivery), not the latest event of any
+    type, so a quartile that straddles midnight can't tack a spurious zero-delivery
+    day onto the calendar. expected_pace and pace_index are each computed once in a
+    CTE so the pace_label CASE can't drift from the pace_index column.
     """
     spark.sql("CREATE NAMESPACE IF NOT EXISTS lh.gold")
     spark.sql(
@@ -17,7 +22,8 @@ def build(spark: SparkSession) -> None:
         PARTITIONED BY (campaign_id)
         AS
         WITH as_of AS (
-          SELECT max(CAST(event_ts AS DATE)) AS as_of_date FROM lh.silver.fact_event
+          SELECT max(CAST(event_ts AS DATE)) AS as_of_date
+          FROM lh.silver.fact_event WHERE event_type = 'impression'
         ),
         daily AS (
           SELECT campaign_id, CAST(event_ts AS DATE) AS pacing_date,
@@ -42,7 +48,7 @@ def build(spark: SparkSession) -> None:
           WHERE cal.pacing_date <= a.as_of_date
         ),
         cum AS (
-          SELECT *,
+          SELECT campaign_id, pacing_date, budget, delivered_impressions,
             sum(delivered_impressions) OVER (
               PARTITION BY campaign_id ORDER BY pacing_date
               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
@@ -50,23 +56,26 @@ def build(spark: SparkSession) -> None:
             datediff(pacing_date, flight_start) + 1 AS days_elapsed,
             datediff(flight_end, flight_start) + 1 AS flight_days
           FROM windowed
+        ),
+        paced AS (
+          SELECT campaign_id, pacing_date, delivered_impressions, cumulative_delivered, budget,
+                 budget * (days_elapsed / CAST(flight_days AS DOUBLE)) AS expected_pace
+          FROM cum
+        ),
+        indexed AS (
+          SELECT *, cumulative_delivered / nullif(expected_pace, 0) AS pace_index
+          FROM paced
         )
-        SELECT
-          campaign_id, pacing_date, delivered_impressions, cumulative_delivered, budget,
-          budget * (days_elapsed / CAST(flight_days AS DOUBLE)) AS expected_pace,
-          cumulative_delivered
-            / nullif(budget * (days_elapsed / CAST(flight_days AS DOUBLE)), 0) AS pace_index,
+        SELECT *,
           CASE
-            WHEN cumulative_delivered
-                 / nullif(budget * (days_elapsed / CAST(flight_days AS DOUBLE)), 0) >= 1.05
-              THEN 'ahead'
-            WHEN cumulative_delivered
-                 / nullif(budget * (days_elapsed / CAST(flight_days AS DOUBLE)), 0) <= 0.95
-              THEN 'behind'
+            WHEN pace_index >= 1.05 THEN 'ahead'
+            WHEN pace_index <= 0.95 THEN 'behind'
             ELSE 'on_track'
           END AS pace_label
-        FROM cum
+        FROM indexed
         """
     )
+    # Read-back count: this is a CTAS, so query the persisted table to log what landed.
     n = spark.sql("SELECT count(*) AS c FROM lh.gold.campaign_pacing").collect()[0]["c"]
+    assert n > 0, "[gold_pacing] no rows written — is silver.fact_event populated?"
     print(f"[gold_pacing] wrote {n} campaign-day rows")
