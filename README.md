@@ -5,14 +5,17 @@ Engineering team actually ships: ingest ad-serving events, land them in Apache
 Iceberg, and turn them into clean, connected data products (delivery, inventory
 fill, campaign pacing).
 
-**What runs today (streaming spine + silver):**
+**What runs today (streaming spine + silver + gold):**
 
 ```
 generator ──▶ Redpanda (Kafka) ──▶ Spark Structured Streaming ──▶ Iceberg bronze ──┐
  (Python)      topic: ad_events        (checkpointed ingest)        (append-only)  │
                                                                                    ▼
-   FastAPI campaigns ──▶ Spark SQL ──▶ Iceberg silver (dim_campaign + fact_event) ──▶ Trino
-   (:8000)                                (dedup / late-data, idempotent builds)       (queries)
+   FastAPI campaigns ──▶ Spark SQL ──▶ Iceberg silver (dim_campaign + fact_event) ──┐
+   (:8000)                                (dedup / late-data, idempotent builds)     │
+                                                                                    ▼
+              Spark SQL ──▶ Iceberg gold (fact_impression_delivery,                Trino
+                            inventory_fill, campaign_pacing) ──────────────────▶ (queries)
 ```
 
 A synthetic generator emits ad events — ad requests, impressions, quartile
@@ -28,6 +31,22 @@ clean **silver** layer: `silver.dim_campaign` (campaigns from the API) and
 `silver.fact_event` (events deduped on `event_id`, late events landed in their true
 `event_ts` partition). The builds are idempotent (`CREATE OR REPLACE`).
 
+A **gold** layer then reshapes silver into analyst-ready data products, all built in
+one Spark session: `gold.fact_impression_delivery` (one row per impression with its
+quartile-completion flags), `gold.inventory_fill` (requests vs impressions per
+placement/day → fill rate), and `gold.campaign_pacing` (the headline product, below).
+
+### Campaign pacing
+
+`gold.campaign_pacing` is the headline data product: one row per campaign per day,
+tracking `cumulative_delivered` impressions against an `expected_pace` derived by
+prorating the campaign's budget across its flight. The ratio of the two is a
+`pace_index`, bucketed into a `pace_label` — `ahead`, `on_track`, or `behind` — so a
+trader can scan a leaderboard and see at a glance which campaigns need attention.
+Event spread and budgets are calibrated to the demo's synthetic volume so the labels
+genuinely vary (most campaigns land `behind`, a few `ahead` or `on_track`); it is a
+realistic shape, not a hand-tuned happy path.
+
 Storage (MinIO), catalog (Iceberg REST), and compute (Spark + Trino) are
 independent, swappable layers — the way modern lakehouses actually run.
 
@@ -41,6 +60,8 @@ make stream        # start Structured Streaming Kafka -> bronze (see note below)
 make seed          # produce 10k ad events to Kafka
 make build-silver  # silver.dim_campaign (from the API) + deduped silver.fact_event
 make silver-checks # dedup + campaign-join sanity via Trino
+make build-gold    # gold delivery + inventory fill + campaign pacing
+make gold-queries  # pacing leaderboard, fill by placement, completion funnel
 make query         # count rows landed in bronze, via Trino
 make test          # unit tests   (run `make` integration smoke separately, below)
 ```
@@ -91,7 +112,7 @@ This repo is built in milestones; each produces working, testable software.
 |------|-------|--------|
 | 1. Infra + streaming spine | generator → Kafka → Spark Structured Streaming → Iceberg bronze → Trino | ✅ **done** |
 | 2. Medallion silver + campaign API | FastAPI campaigns, bronze→silver (dedup/late-data, idempotent builds) | ✅ **done** |
-| 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | planned |
+| 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | ✅ **done** |
 | 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | planned |
 | 4. GDPR right-to-be-forgotten | `bucket()`-efficient MERGE deletes + merge-on-read equality deletes | planned |
 | 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | planned |
@@ -103,7 +124,7 @@ This repo is built in milestones; each produces working, testable software.
 | `generator/` | Synthetic ad-event model, batch generator (dupes + late events), Kafka producer |
 | `streaming/` | Spark session builder + Structured Streaming ingest to Iceberg bronze |
 | `api/` | FastAPI campaign-metadata service (http://localhost:8000) |
-| `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`) + `run.py` driver |
+| `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`), gold builds (`gold_delivery`, `gold_fill`, `gold_pacing` → `gold.fact_impression_delivery`, `gold.inventory_fill`, `gold.campaign_pacing`) + `run.py` driver |
 | `docker-compose.yml`, `docker/` | Redpanda, MinIO, Iceberg REST catalog, Spark, Trino |
 | `trino/` | Analyst SQL against the lakehouse |
 | `tests/` | pytest: generator unit tests + an integration smoke test |

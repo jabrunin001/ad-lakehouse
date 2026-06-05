@@ -31,7 +31,11 @@ def test_pinned_values_cmp001():
     # fails loudly instead of corrupting downstream pacing.
     c = build_campaigns(REF)[0]
     assert c.campaign_id == "cmp-001"
-    assert c.budget == 483_000
-    assert c.target_geo == "US-CA"
-    assert c.target_device == "desktop"
+    assert c.budget == 429
+    assert c.target_geo == "GB-LND"
+    assert c.target_device == "mobile"
     assert (c.flight_end - c.flight_start).days == 17
+
+def test_budget_is_calibrated_to_demo_volume():
+    for c in build_campaigns(REF):
+        assert 300 <= c.budget <= 1500

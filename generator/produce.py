@@ -16,6 +16,8 @@ def main() -> None:
     ap.add_argument("--late-rate", type=float, default=0.05)
     ap.add_argument("--fill-prob", type=float, default=0.7,
                     help="fraction of ad requests that produce an impression (0-1)")
+    ap.add_argument("--spread-days", type=float, default=10.0,
+                    help="spread request timestamps uniformly over the last N days")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -25,7 +27,8 @@ def main() -> None:
 
     now = datetime.now(timezone.utc)
     count = 0
-    for ev in event_batch(args.n, now, args.dup_rate, args.late_rate, args.seed, args.fill_prob):
+    for ev in event_batch(args.n, now, args.dup_rate, args.late_rate,
+                          args.seed, args.fill_prob, args.spread_days):
         payload = ev.model_dump()
         payload["event_ts"] = payload["event_ts"].isoformat()
         producer.produce(topic, key=ev.user_id, value=json.dumps(payload))
