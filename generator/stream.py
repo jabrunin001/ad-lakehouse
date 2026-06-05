@@ -29,7 +29,9 @@ def event_batch(
     """
     r = random.Random(seed)
     for i in range(n_requests):
-        base = now - timedelta(seconds=r.random() * spread_days * 86_400)
+        # Short-circuit at 0 so we don't consume an RNG draw: keeps the dup/late
+        # sequence identical to a non-spread run for a given seed (back-compat).
+        base = now if spread_days == 0.0 else now - timedelta(days=r.random() * spread_days)
         for ev in request_session(seed=seed * 1_000_003 + i, now=base, fill_prob=fill_prob):
             if r.random() < late_rate:
                 ev = ev.model_copy(

@@ -42,6 +42,8 @@ def test_spread_distributes_events_over_multiple_days():
     assert len(days) >= 5  # events span many distinct days, not one spike
 
 def test_spread_zero_keeps_single_day():
+    # fill_prob>0 so sessions emit impressions/quartiles (now+seconds) too — all
+    # must still land on NOW's date when spread is disabled.
     events = list(event_batch(n_requests=500, now=NOW, dup_rate=0.0, late_rate=0.0,
-                              seed=5, fill_prob=0.0, spread_days=0))
+                              seed=5, fill_prob=0.5, spread_days=0))
     assert {e.event_ts.date() for e in events} == {NOW.date()}
