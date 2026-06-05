@@ -23,7 +23,11 @@ def test_duplicates_inflate_total_but_not_distinct():
     events = list(event_batch(n_requests=2000, now=NOW, dup_rate=0.05, late_rate=0.0,
                               seed=2, fill_prob=0.7))
     ids = [e.event_id for e in events]
-    assert len(ids) > len(set(ids))  # duplicates present
+    extra = len(ids) - len(set(ids))
+    # ~5% of the (multi-thousand) event stream re-emitted: expect a clear floor,
+    # not just a single dup, so a silent regression in dup injection is caught.
+    assert extra >= 50
+    assert extra / len(set(ids)) <= 0.08
 
 def test_late_events_are_backdated():
     events = list(event_batch(n_requests=3000, now=NOW, dup_rate=0.0, late_rate=0.05,
