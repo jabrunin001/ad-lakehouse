@@ -15,6 +15,8 @@ PACKAGES = (
 
 def spark_submit(target: str) -> str:
     """Return the bash command that runs `transform/run.py <target>` in the spark container."""
+    # `target` must be a DAG-authored literal (e.g. "silver", "gold", "maintenance");
+    # no user input reaches this path, so the bare interpolation is safe.
     return (
         f"docker exec -e PYTHONPATH=/opt/app {SPARK_CONTAINER} "
         f"/opt/spark/bin/spark-submit --conf spark.jars.ivy=/tmp/.ivy2 "
