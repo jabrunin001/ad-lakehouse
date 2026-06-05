@@ -2,7 +2,7 @@
 import sys
 
 from streaming.spark_session import build_spark
-from transform import dim_campaign, fact_event, gold_delivery, gold_fill, gold_pacing
+from transform import dim_campaign, fact_event, gold_delivery, gold_fill, gold_pacing, maintenance
 
 BUILDERS = {
     "dim_campaign": dim_campaign.build,
@@ -10,11 +10,13 @@ BUILDERS = {
     "gold_delivery": gold_delivery.build,
     "gold_fill": gold_fill.build,
     "gold_pacing": gold_pacing.build,
+    "maintenance": maintenance.build,
 }
 GROUPS = {
     "silver": ["dim_campaign", "fact_event"],
     "gold": ["gold_delivery", "gold_fill", "gold_pacing"],
     "all": ["dim_campaign", "fact_event", "gold_delivery", "gold_fill", "gold_pacing"],
+    "maintenance": ["maintenance"],
 }
 
 
