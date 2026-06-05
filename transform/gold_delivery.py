@@ -5,8 +5,12 @@ from pyspark.sql import SparkSession
 def build(spark: SparkSession) -> None:
     """gold.fact_impression_delivery: one row per impression, with quartile
     completion flags folded in from quartile events sharing the request_id.
-    Each filled request has exactly one impression in silver, so request_id is a
-    safe grain. CREATE OR REPLACE makes it idempotent.
+
+    Grain = request_id. This is safe because silver.fact_event is deduped on
+    event_id and request_session emits at most one impression per request, so a
+    request_id maps to a single impression row. If that upstream guarantee ever
+    changed, the GROUP BY would silently merge impressions — guard then.
+    CREATE OR REPLACE makes it idempotent.
     """
     spark.sql("CREATE NAMESPACE IF NOT EXISTS lh.gold")
     spark.sql(
@@ -31,5 +35,6 @@ def build(spark: SparkSession) -> None:
                  i.user_id, i.device, i.geo, i.placement
         """
     )
+    # Read-back count: this is a CTAS, so query the persisted table to log what landed.
     n = spark.sql("SELECT count(*) AS c FROM lh.gold.fact_impression_delivery").collect()[0]["c"]
     print(f"[gold_delivery] wrote {n} impression rows")
