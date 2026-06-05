@@ -53,7 +53,22 @@ make test          # unit tests   (run `make` integration smoke separately, belo
 > Run `make topic` first — Redpanda does not auto-create `ad_events` for a
 > consumer, so a fresh `make stream` would otherwise crash.
 
-Run the end-to-end smoke test (requires the stack up + bronze populated):
+`make build-silver` pulls campaign metadata over HTTP, so the `api` service must be
+up (it is, after `make up`); a failed pull surfaces as a Spark error.
+
+**What "good" looks like** — `make silver-checks` proves the medallion boundary held:
+
+```
+ events | distinct_events | campaigns | joinable_events
+ 31525  |     31525       |    20     |     31525
+```
+
+`events == distinct_events` means silver deduped what bronze deliberately duplicated;
+`joinable_events == events` means every event's `campaign_id` resolves to a campaign;
+and the integration suite's orphan-impression check confirms each impression still
+links to its `ad_request` after the bronze→silver round trip.
+
+Run the end-to-end smoke + silver tests (requires the stack up + built):
 
 ```bash
 .venv/bin/pytest -m integration -v
