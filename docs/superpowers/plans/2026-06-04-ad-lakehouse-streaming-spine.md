@@ -390,8 +390,8 @@ import os
 from pyspark.sql import SparkSession
 
 ICEBERG_PKGS = (
-    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,"
-    "org.apache.iceberg:iceberg-aws-bundle:1.5.2,"
+    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,"
+    "org.apache.iceberg:iceberg-aws-bundle:1.8.1,"
     "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
 )
 
@@ -567,16 +567,18 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-docker compose exec -d spark /opt/spark/bin/spark-submit \
-  --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,org.apache.iceberg:iceberg-aws-bundle:1.5.2,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+docker compose exec -d -e PYTHONPATH=/opt/app spark /opt/spark/bin/spark-submit \
+  --conf spark.jars.ivy=/tmp/.ivy2 \
+  --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
   /opt/app/streaming/ingest_bronze.py
 ```
+Note: `-e PYTHONPATH=/opt/app` is required so the `streaming` package is importable (spark-submit puts the script's dir on sys.path, not cwd). `--conf spark.jars.ivy=/tmp/.ivy2` is required because the `spark` container user has no writable home for Ivy's default cache.
 Expected: job starts; after ~30s it has processed the earliest offsets. (Check `docker compose logs spark | tail`.)
 
 - [ ] **Step 3: Produce more events while streaming runs**
 
-Run: `. .venv/bin/activate && set -a && . ./.env && set +a && python -m generator.produce --n 5000 --seed 9`
-Expected: `produced ~5100 events to ad_events`.
+Run: `set -a && . ./.env && set +a && .venv/bin/python -m generator.produce --n 5000 --seed 9`
+Expected: `produced ~5100 events to ad_events`. (Use `.venv/bin/python` explicitly — a shell alias may shadow the venv's `python`.)
 
 - [ ] **Step 4: Verify rows landed in bronze via Trino**
 
@@ -615,9 +617,10 @@ FROM iceberg.bronze.ad_events_raw;
 .PHONY: up down seed stream query test lint
 up:        ; docker compose up -d
 down:      ; docker compose down -v
-seed:      ; . .venv/bin/activate && set -a && . ./.env && set +a && python -m generator.produce --n 10000
-stream:    ; docker compose exec -d spark /opt/spark/bin/spark-submit \
-             --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,org.apache.iceberg:iceberg-aws-bundle:1.5.2,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+seed:      ; set -a && . ./.env && set +a && .venv/bin/python -m generator.produce --n 10000
+stream:    ; docker compose exec -d -e PYTHONPATH=/opt/app spark /opt/spark/bin/spark-submit \
+             --conf spark.jars.ivy=/tmp/.ivy2 \
+             --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
              /opt/app/streaming/ingest_bronze.py
 query:     ; docker compose exec -T trino trino --catalog iceberg < trino/00_bronze_smoke.sql
 test:      ; . .venv/bin/activate && pytest -v
