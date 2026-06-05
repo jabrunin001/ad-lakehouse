@@ -1,4 +1,4 @@
-.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint
+.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint airflow-up airflow-password dags-list dag-medallion
 
 up:
 	docker compose up -d
@@ -44,3 +44,8 @@ test:
 
 lint:
 	.venv/bin/ruff check .
+
+airflow-up: ; docker compose up -d --build airflow
+airflow-password: ; docker compose exec -T airflow cat /opt/airflow/standalone_admin_password.txt
+dags-list: ; docker compose exec -T airflow airflow dags list
+dag-medallion: ; docker compose exec -T airflow airflow dags test medallion_build 2026-06-05

@@ -41,6 +41,7 @@ services:
 
   spark:
     image: apache/spark:3.5.1-python3
+    container_name: ad-lakehouse-spark
     depends_on: [iceberg-rest, redpanda, minio]
     environment:
       AWS_ACCESS_KEY_ID: admin
@@ -65,3 +66,19 @@ services:
     volumes:
       - ./:/opt/app
     ports: ["8000:8000"]
+
+  airflow:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    user: "0:0"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports: ["8082:8080"]
+    command: standalone

@@ -64,7 +64,16 @@ make build-gold    # gold delivery + inventory fill + campaign pacing
 make gold-queries  # pacing leaderboard, fill by placement, completion funnel
 make query         # count rows landed in bronze, via Trino
 make test          # unit tests   (run `make` integration smoke separately, below)
+
+make airflow-up        # start Airflow (standalone) — UI at http://localhost:8082
+make airflow-password  # print the generated admin password
+make dags-list         # list the DAGs
+make dag-medallion     # run the silver->gold DAG end to end
 ```
+
+> **Docker memory:** give Docker **≥ 8 GB** — Airflow plus Spark, Trino, MinIO,
+> Redpanda, and the Iceberg REST catalog all run as containers. The Airflow UI is
+> at **http://localhost:8082**.
 
 > **First `make stream` is slow (~1–2 min):** Spark downloads the Iceberg + Kafka
 > connector jars via Ivy on first launch, then the job initializes. It is not
@@ -98,6 +107,37 @@ Run the end-to-end smoke + silver tests (requires the stack up + built):
 Consoles: **Trino** at http://localhost:8081 (host 8081 → container 8080),
 **MinIO** at http://localhost:9001.
 
+## Orchestration
+
+Airflow (running in **standalone** mode) orchestrates the batch side of the
+lakehouse with three DAGs (`airflow/dags/`):
+
+- **`campaign_pull`** (`@daily`) — pulls campaign metadata from the FastAPI service
+  into `silver.dim_campaign`.
+- **`medallion_build`** (`@hourly`) — builds **silver → gold** in dependency order
+  (`build_silver >> build_gold`).
+- **`iceberg_maintenance`** (`@daily`) — compacts small files and expires old
+  snapshots across the Iceberg tables.
+
+All three carry **retries**, so a transient Spark OOM on a single task self-heals on
+the next attempt instead of failing the run.
+
+A deliberate design choice: **Airflow does not run Spark itself.** Each task
+`docker exec`s into the long-lived `spark` container — Docker-out-of-Docker — so the
+exact same `spark-submit` invocations `make` uses are what the DAGs run, with one
+Spark runtime shared across the stack. **Streaming stays a long-lived service outside
+Airflow** (continuous Kafka → bronze ingest is not a scheduled batch job).
+
+### Local-demo security note
+
+To `docker exec` the Spark container, the Airflow container **runs as root** and
+**mounts the host Docker socket**, and `AIRFLOW__WEBSERVER__EXPOSE_CONFIG` is **on**.
+These are acceptable tradeoffs for a **local, single-node demo** and **never for
+production**. In a real deployment you would run Airflow as a **non-root user**, reach
+Docker through a **socket proxy** (not the raw socket), and **disable config
+exposure** — plus an executor (Kubernetes/Celery) that schedules real workers rather
+than `docker exec`.
+
 ## Design
 
 The full design — data model, the bronze→silver→gold medallion, GDPR
@@ -113,7 +153,7 @@ This repo is built in milestones; each produces working, testable software.
 | 1. Infra + streaming spine | generator → Kafka → Spark Structured Streaming → Iceberg bronze → Trino | ✅ **done** |
 | 2. Medallion silver + campaign API | FastAPI campaigns, bronze→silver (dedup/late-data, idempotent builds) | ✅ **done** |
 | 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | ✅ **done** |
-| 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | planned |
+| 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | ✅ **done** |
 | 4. GDPR right-to-be-forgotten | `bucket()`-efficient MERGE deletes + merge-on-read equality deletes | planned |
 | 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | planned |
 
@@ -125,6 +165,7 @@ This repo is built in milestones; each produces working, testable software.
 | `streaming/` | Spark session builder + Structured Streaming ingest to Iceberg bronze |
 | `api/` | FastAPI campaign-metadata service (http://localhost:8000) |
 | `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`), gold builds (`gold_delivery`, `gold_fill`, `gold_pacing` → `gold.fact_impression_delivery`, `gold.inventory_fill`, `gold.campaign_pacing`) + `run.py` driver |
+| `airflow/` | Airflow DAGs orchestrating the batch builds + Iceberg maintenance (`campaign_pull`, `medallion_build`, `iceberg_maintenance`); each `docker exec`s the Spark container |
 | `docker-compose.yml`, `docker/` | Redpanda, MinIO, Iceberg REST catalog, Spark, Trino |
 | `trino/` | Analyst SQL against the lakehouse |
 | `tests/` | pytest: generator unit tests + an integration smoke test |
