@@ -4,7 +4,7 @@ from datetime import datetime
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
-from _spark import spark_submit
+from _spark import DEFAULT_ARGS, spark_submit
 
 with DAG(
     dag_id="campaign_pull",
@@ -12,6 +12,7 @@ with DAG(
     schedule="@daily",
     start_date=datetime(2026, 6, 1),
     catchup=False,
+    default_args=DEFAULT_ARGS,
     tags=["ad-lakehouse", "silver"],
 ):
     BashOperator(task_id="pull_dim_campaign", bash_command=spark_submit("dim_campaign"))
