@@ -35,3 +35,22 @@ def test_deterministic():
     a = request_session(seed=11, now=NOW)
     b = request_session(seed=11, now=NOW)
     assert [e.model_dump() for e in a] == [e.model_dump() for e in b]
+
+
+def test_seed_zero_is_decorrelated_from_make_event():
+    # the session RNG must not reproduce make_event(seed=0)'s own draws
+    from generator.event import make_event
+    sess = request_session(seed=0, now=NOW, fill_prob=1.0, quartile_probs=(1, 1, 1, 1))
+    assert sess[0].event_id != make_event(seed=0, now=NOW).event_id
+
+
+def test_short_quartile_probs_does_not_raise():
+    # fewer probs than quartiles must truncate, not IndexError
+    evs = request_session(seed=1, now=NOW, fill_prob=1.0, quartile_probs=(1.0, 0.0))
+    assert [e.event_type for e in evs] == ["ad_request", "impression", "q25"]
+
+
+def test_timestamps_strictly_increasing_within_session():
+    evs = request_session(seed=3, now=NOW, fill_prob=1.0, quartile_probs=(1, 1, 1, 1))
+    ts = [e.event_ts for e in evs]
+    assert ts == sorted(ts) and len(set(ts)) == len(ts)

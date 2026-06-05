@@ -23,7 +23,7 @@ def request_session(
     Reuses make_event() purely as the source of the shared request dimensions.
     """
     base = make_event(seed=seed, now=now)
-    r = random.Random((seed * 2_654_435_761) % (2**64))
+    r = random.Random(seed ^ 0x9E3779B97F4A7C15)
     shared = dict(
         campaign_id=base.campaign_id,
         creative_id=base.creative_id,
@@ -46,8 +46,8 @@ def request_session(
     if r.random() < fill_prob:
         t = now + timedelta(seconds=1)
         events.append(evt("impression", t))
-        for i, q in enumerate(QUARTILES):
-            if r.random() < quartile_probs[i]:
+        for q, prob in zip(QUARTILES, quartile_probs):
+            if r.random() < prob:
                 t += timedelta(seconds=2)
                 events.append(evt(q, t))
             else:
