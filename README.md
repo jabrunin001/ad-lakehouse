@@ -5,11 +5,14 @@ Engineering team actually ships: ingest ad-serving events, land them in Apache
 Iceberg, and turn them into clean, connected data products (delivery, inventory
 fill, campaign pacing).
 
-**What runs today (the streaming spine):**
+**What runs today (streaming spine + silver):**
 
 ```
-generator ──▶ Redpanda (Kafka) ──▶ Spark Structured Streaming ──▶ Iceberg bronze ──▶ Trino
- (Python)      topic: ad_events        (checkpointed ingest)        (append-only)     (queries)
+generator ──▶ Redpanda (Kafka) ──▶ Spark Structured Streaming ──▶ Iceberg bronze ──┐
+ (Python)      topic: ad_events        (checkpointed ingest)        (append-only)  │
+                                                                                   ▼
+   FastAPI campaigns ──▶ Spark SQL ──▶ Iceberg silver (dim_campaign + fact_event) ──▶ Trino
+   (:8000)                                (dedup / late-data, idempotent builds)       (queries)
 ```
 
 A synthetic generator emits ad events — ad requests, impressions, quartile
@@ -19,6 +22,12 @@ reads the Kafka topic and appends every event, raw, to an Iceberg `bronze` table
 on MinIO/S3, behind an Iceberg REST catalog. Trino queries the same tables Spark
 writes.
 
+A FastAPI service (`api/`, http://localhost:8000) serves campaign metadata, and a
+batch transform layer (`transform/`) runs Spark SQL builds that turn bronze into a
+clean **silver** layer: `silver.dim_campaign` (campaigns from the API) and
+`silver.fact_event` (events deduped on `event_id`, late events landed in their true
+`event_ts` partition). The builds are idempotent (`CREATE OR REPLACE`).
+
 Storage (MinIO), catalog (Iceberg REST), and compute (Spark + Trino) are
 independent, swappable layers — the way modern lakehouses actually run.
 
@@ -26,11 +35,14 @@ independent, swappable layers — the way modern lakehouses actually run.
 
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'
-make up       # start redpanda + minio + iceberg-rest + spark + trino
-make stream   # start Structured Streaming Kafka -> bronze (see note below)
-make seed     # produce 10k ad events to Kafka
-make query    # count rows landed in bronze, via Trino
-make test     # unit tests   (run `make` integration smoke separately, below)
+make up            # start redpanda + minio + iceberg-rest + spark + trino + api
+make topic         # create the ad_events topic (required before the consumer starts)
+make stream        # start Structured Streaming Kafka -> bronze (see note below)
+make seed          # produce 10k ad events to Kafka
+make build-silver  # silver.dim_campaign (from the API) + deduped silver.fact_event
+make silver-checks # dedup + campaign-join sanity via Trino
+make query         # count rows landed in bronze, via Trino
+make test          # unit tests   (run `make` integration smoke separately, below)
 ```
 
 > **First `make stream` is slow (~1–2 min):** Spark downloads the Iceberg + Kafka
@@ -38,6 +50,8 @@ make test     # unit tests   (run `make` integration smoke separately, below)
 > hung. Watch progress with `docker compose logs --tail 40 spark`. `make stream`
 > must run *before* `make seed` so the consumer is live when events are produced
 > (though `startingOffsets=earliest` will also pick up a topic seeded earlier).
+> Run `make topic` first — Redpanda does not auto-create `ad_events` for a
+> consumer, so a fresh `make stream` would otherwise crash.
 
 Run the end-to-end smoke test (requires the stack up + bronze populated):
 
@@ -61,7 +75,8 @@ This repo is built in milestones; each produces working, testable software.
 | Plan | Scope | Status |
 |------|-------|--------|
 | 1. Infra + streaming spine | generator → Kafka → Spark Structured Streaming → Iceberg bronze → Trino | ✅ **done** |
-| 2. Medallion + campaign API + gold | FastAPI campaigns, bronze→silver (dedup/late-data), gold delivery/fill/**pacing** | planned |
+| 2. Medallion silver + campaign API | FastAPI campaigns, bronze→silver (dedup/late-data, idempotent builds) | ✅ **done** |
+| 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | planned |
 | 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | planned |
 | 4. GDPR right-to-be-forgotten | `bucket()`-efficient MERGE deletes + merge-on-read equality deletes | planned |
 | 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | planned |
@@ -72,6 +87,8 @@ This repo is built in milestones; each produces working, testable software.
 |------|----------------|
 | `generator/` | Synthetic ad-event model, batch generator (dupes + late events), Kafka producer |
 | `streaming/` | Spark session builder + Structured Streaming ingest to Iceberg bronze |
+| `api/` | FastAPI campaign-metadata service (http://localhost:8000) |
+| `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`) + `run.py` driver |
 | `docker-compose.yml`, `docker/` | Redpanda, MinIO, Iceberg REST catalog, Spark, Trino |
 | `trino/` | Analyst SQL against the lakehouse |
 | `tests/` | pytest: generator unit tests + an integration smoke test |
