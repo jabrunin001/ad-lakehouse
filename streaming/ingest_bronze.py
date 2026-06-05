@@ -1,7 +1,16 @@
 # streaming/ingest_bronze.py
+import os
+
 from pyspark.sql import functions as F
-from pyspark.sql.types import (StructType, StructField, StringType, TimestampType)
+from pyspark.sql.types import StringType, StructField, StructType, TimestampType
+
 from streaming.spark_session import build_spark
+
+# Two contracts intentionally describe the same fields:
+#   EVENT_SCHEMA  — the parse contract for the JSON payload (10 event fields).
+#   the CREATE TABLE DDL — the on-disk contract (those 10 + kafka_ts/ingest_ts
+#   provenance columns). They differ only by provenance; a drift between them
+#   surfaces as a hard mismatch at toTable() rather than silent corruption.
 
 EVENT_SCHEMA = StructType([
     StructField("event_id", StringType()),
@@ -30,12 +39,16 @@ def main() -> None:
         PARTITIONED BY (days(ingest_ts))
     """)
 
+    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_INTERNAL", "redpanda:9092")
     raw = (spark.readStream.format("kafka")
-           .option("kafka.bootstrap.servers", "redpanda:9092")
+           .option("kafka.bootstrap.servers", bootstrap)
            .option("subscribe", "ad_events")
            .option("startingOffsets", "earliest")
            .load())
 
+    # from_json yields a struct of all-null fields on a record it can't parse;
+    # bronze tolerates that (append-only, raw). Quarantining/dropping malformed
+    # rows is a silver-layer concern, not this layer's.
     parsed = (raw.select(
                 F.from_json(F.col("value").cast("string"), EVENT_SCHEMA).alias("e"),
                 F.col("timestamp").alias("kafka_ts"))
