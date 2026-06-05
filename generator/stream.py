@@ -14,8 +14,10 @@ def event_batch(
     late_rate: float,
     seed: int = 0,
 ) -> Iterator[AdEvent]:
-    """Yield n unique base events, plus duplicate re-emissions (~dup_rate),
-    with ~late_rate of all events backdated to simulate late arrival."""
+    """Yield n unique base events, plus duplicate re-emissions (~dup_rate).
+
+    ~late_rate of base events are backdated to simulate late arrival;
+    duplicates inherit the (possibly backdated) timestamp of their base event."""
     r = random.Random(seed)
     for i in range(n):
         ev = make_event(seed=seed * 1_000_003 + i, now=now)
