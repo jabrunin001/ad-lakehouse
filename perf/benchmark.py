@@ -149,9 +149,9 @@ def _write_report(layouts: dict, results: dict) -> None:
               "docker-exec overhead is the same for both tables, so the comparison holds).",
               "Bytes scanned is the physical input reported by `EXPLAIN ANALYZE`; the",
               "optimized table reads far less on the user- and date-filtered queries because",
-              "partition pruning skips the non-matching files. The campaign rollup is a full",
-              "aggregate over all rows, so it reads everything either way — its only edge is",
-              "the optimized table's smaller file count, not pruning.",
+              "partition pruning skips the non-matching files. The campaign rollup filters on",
+              "event_type (not a partition column), so it reads every file either way; the",
+              "optimized table's only edge there is its smaller file count, not pruning.",
               ""]
     out_path = Path(__file__).resolve().parent.parent / "docs" / "performance.md"
     out_path.write_text("\n".join(lines) + "\n")
