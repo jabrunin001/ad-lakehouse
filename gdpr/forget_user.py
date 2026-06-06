@@ -5,41 +5,45 @@ import re
 from pyspark.sql import SparkSession
 
 from streaming.spark_session import build_spark
-from transform import gold_delivery, gold_fill, gold_pacing
+from transform import gold_fill, gold_pacing
 
 # user_ids are synthetic ids like "usr-04897". Allowlist their character set so an
 # operator- or DAG-supplied value can never break out of the DELETE predicate
 # (this code interpolates it into Spark SQL).
 _USER_ID_RE = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
-# Base tables that physically store the user's PII rows.
-PII_TABLES = ["bronze.ad_events_raw", "silver.fact_event"]
-# All tables whose snapshots must be expired so the user is unrecoverable
-# (the two PII bases plus the gold tables that get rebuilt below).
-TOUCHED_TABLES = PII_TABLES + [
+# Every table that carries the user's PII (a user_id column) — row-level DELETE.
+PII_TABLES = [
+    "bronze.ad_events_raw",
+    "silver.fact_event",
     "gold.fact_impression_delivery",
-    "gold.inventory_fill",
-    "gold.campaign_pacing",
 ]
+# Aggregate gold tables have NO user_id column (counts only), so they can't be
+# row-deleted — recompute them from the now-cleaned silver instead.
+AGGREGATE_BUILDERS = (gold_fill, gold_pacing)
+# All tables whose snapshots must be expired so the user is unrecoverable.
+TOUCHED_TABLES = PII_TABLES + ["gold.inventory_fill", "gold.campaign_pacing"]
 
 
 def forget(spark: SparkSession, user_id: str) -> None:
     """GDPR right-to-be-forgotten for one user_id.
 
-    1. Row-level DELETE from the PII base tables. silver.fact_event is
+    1. Row-level DELETE from every table carrying the user's PII (bronze,
+       silver, and the per-impression gold fact). silver.fact_event is
        bucket(16, user_id)-partitioned, so the predicate prunes to one bucket and
-       the copy-on-write rewrite touches a fraction of the data. bronze has no user
-       partitioning (scattered rewrite) but must be cleaned so a later silver
-       rebuild can't resurrect the user.
-    2. Rebuild the gold layer from the now-cleaned silver: fact_impression_delivery
-       drops the user's rows; inventory_fill / campaign_pacing recompute without
-       the user's impressions (they can't be row-deleted — no user_id column).
+       the copy-on-write rewrite touches a fraction of the data. Deleting bronze is
+       required so a later silver rebuild can't resurrect the user.
+    2. Recompute the aggregate gold tables (inventory_fill, campaign_pacing) from
+       the now-cleaned silver — they have no user_id column to delete on, so their
+       counts must be rebuilt to drop the user's contribution. (The per-impression
+       fact_impression_delivery is row-deleted in step 1, not rebuilt — it carries
+       user_id and a targeted delete is far lighter than its join-rebuild.)
     3. expire_snapshots on every touched table so the pre-delete snapshots, which
        still contain the user, are physically removed (true erasure, not logical).
 
     Boundary conditions: a partial expiry failure surfaces as a raised RuntimeError
     (the operator/DAG must retry), while the audit row records that erasure was
-    performed. Forgetting the *last* remaining user would trip the gold builds'
+    performed. Forgetting the *last* remaining user would trip the aggregate builds'
     `assert n > 0` before expiry — a recoverable fail-stop, not corruption — but is
     not a realistic case on a multi-thousand-user dataset.
     """
@@ -49,8 +53,8 @@ def forget(spark: SparkSession, user_id: str) -> None:
         spark.sql(f"DELETE FROM lh.{table} WHERE user_id = '{user_id}'")
         print(f"[forget] deleted {user_id} from {table}")
 
-    # Rebuild gold from cleaned silver.
-    for mod in (gold_delivery, gold_fill, gold_pacing):
+    # Recompute the aggregate gold tables from cleaned silver.
+    for mod in AGGREGATE_BUILDERS:
         mod.build(spark)
 
     now = spark.sql(

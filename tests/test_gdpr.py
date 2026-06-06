@@ -11,9 +11,12 @@ PKGS = (
 
 
 def _spark(script: str, *args: str) -> str:
+    # shuffle.partitions=8: the default 200 is wasteful on this ~31k-row demo and
+    # the extra task overhead OOM-kills the gold rebuild on a memory-tight host.
     return subprocess.check_output(
         ["docker", "exec", "-e", "PYTHONPATH=/opt/app", "ad-lakehouse-spark",
          "/opt/spark/bin/spark-submit", "--conf", "spark.jars.ivy=/tmp/.ivy2",
+         "--conf", "spark.sql.shuffle.partitions=8",
          "--packages", PKGS, f"/opt/app/{script}", *args],
         text=True, stderr=subprocess.STDOUT,
     )
