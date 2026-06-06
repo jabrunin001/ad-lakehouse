@@ -1,11 +1,14 @@
 """Build two Iceberg tables over the SAME amplified data:
 
-  perf.events_bad        — unpartitioned, ~1000 tiny files, never compacted
-                           (the small-files / full-scan problem).
+  perf.events_bad        — unpartitioned, ~500 tiny files, never compacted, so every
+                           query is a full scan of the whole flat pile.
   perf.events_optimized  — hidden-partitioned by days(event_ts), bucket(16, user_id),
-                           then compacted + sorted via rewrite_data_files.
+                           then sort-clustered via rewrite_data_files. Fewer files,
+                           organized so user/date queries prune to the matching ones.
+                           (At this data scale the per-file size is smaller, not larger;
+                           the win is pruning + file count, not file-size growth.)
 
-silver.fact_event is only ~31k rows, so it is amplified ~20x first (event_id made
+silver.fact_event is only ~31k rows, so it is amplified ~10x first (event_id made
 unique per copy, every other column kept) so query times are measurable rather than
 noise. Both tables are written from one shared source table, so they hold identical rows.
 """
