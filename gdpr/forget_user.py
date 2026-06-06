@@ -1,10 +1,16 @@
 # gdpr/forget_user.py
 import argparse
+import re
 
 from pyspark.sql import SparkSession
 
 from streaming.spark_session import build_spark
 from transform import gold_delivery, gold_fill, gold_pacing
+
+# user_ids are synthetic ids like "usr-04897". Allowlist their character set so an
+# operator- or DAG-supplied value can never break out of the DELETE predicate
+# (this code interpolates it into Spark SQL).
+_USER_ID_RE = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
 # Base tables that physically store the user's PII rows.
 PII_TABLES = ["bronze.ad_events_raw", "silver.fact_event"]
@@ -31,6 +37,8 @@ def forget(spark: SparkSession, user_id: str) -> None:
     3. expire_snapshots on every touched table so the pre-delete snapshots, which
        still contain the user, are physically removed (true erasure, not logical).
     """
+    if not _USER_ID_RE.match(user_id):
+        raise ValueError(f"refusing unsafe user_id {user_id!r} (expected [A-Za-z0-9_-]+)")
     for table in PII_TABLES:
         spark.sql(f"DELETE FROM lh.{table} WHERE user_id = '{user_id}'")
         print(f"[forget] deleted {user_id} from {table}")
