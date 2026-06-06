@@ -5,6 +5,9 @@ Engineering team actually ships: ingest ad-serving events, land them in Apache
 Iceberg, and turn them into clean, connected data products (delivery, inventory
 fill, campaign pacing).
 
+> New here? **[Why this matters (the business value)](docs/business-value.md)** explains
+> what each piece is worth to an ads business. This README is the how; that doc is the why.
+
 **What runs today (streaming spine + silver + gold):**
 
 ```
