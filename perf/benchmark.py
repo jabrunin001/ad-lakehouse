@@ -70,7 +70,7 @@ def _layout(table: str) -> dict:
 def queries(table: str) -> dict:
     uid = _trino(
         f"SELECT user_id FROM {table} GROUP BY user_id ORDER BY count(*) DESC LIMIT 1"
-    ).strip().strip('"')
+    ).strip().strip('"').replace("'", "''")
     day = _trino(f"SELECT CAST(min(event_ts) AS DATE) FROM {table}").strip().strip('"')
     return {
         "user-filtered scan": f"SELECT count(*) FROM {table} WHERE user_id = '{uid}'",
@@ -89,10 +89,11 @@ def queries(table: str) -> dict:
 def run() -> dict:
     results = {}
     layouts = {name: _layout(t) for name, t in TABLES.items()}
-    for qname in queries(TABLES["bad"]):
+    table_queries = {name: queries(t) for name, t in TABLES.items()}  # resolve uid/day once
+    for qname in table_queries["bad"]:
         results[qname] = {}
-        for name, table in TABLES.items():
-            sql = queries(table)[qname]
+        for name in TABLES:
+            sql = table_queries[name][qname]
             results[qname][name] = {
                 "wall_ms": _median_wall_ms(sql),
                 "bytes_scanned": _bytes_scanned(sql),
@@ -152,7 +153,8 @@ def _write_report(layouts: dict, results: dict) -> None:
               "aggregate over all rows, so it reads everything either way — its only edge is",
               "the optimized table's smaller file count, not pruning.",
               ""]
-    Path("docs/performance.md").write_text("\n".join(lines) + "\n")
+    out_path = Path(__file__).resolve().parent.parent / "docs" / "performance.md"
+    out_path.write_text("\n".join(lines) + "\n")
     print("[bench] wrote docs/performance.md")
 
 
