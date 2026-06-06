@@ -1,4 +1,4 @@
-.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint airflow-up airflow-password dags-list dag-medallion
+.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint airflow-up airflow-password dags-list dag-medallion gdpr-efficiency gdpr-mor forget-user
 
 up:
 	docker compose up -d
@@ -49,3 +49,16 @@ airflow-up: ; docker compose up -d --build airflow
 airflow-password: ; docker compose exec -T airflow cat /opt/airflow/standalone_admin_password.txt
 dags-list: ; docker compose exec -T airflow airflow dags list
 dag-medallion: ; docker compose exec -T airflow airflow dags test medallion_build 2026-06-05
+
+gdpr-efficiency: ; docker exec -e PYTHONPATH=/opt/app ad-lakehouse-spark /opt/spark/bin/spark-submit \
+	--conf spark.jars.ivy=/tmp/.ivy2 \
+	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+	/opt/app/gdpr/efficiency_demo.py
+gdpr-mor: ; docker exec -e PYTHONPATH=/opt/app ad-lakehouse-spark /opt/spark/bin/spark-submit \
+	--conf spark.jars.ivy=/tmp/.ivy2 \
+	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+	/opt/app/gdpr/mor_demo.py
+forget-user: ; docker exec -e PYTHONPATH=/opt/app ad-lakehouse-spark /opt/spark/bin/spark-submit \
+	--conf spark.jars.ivy=/tmp/.ivy2 \
+	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+	/opt/app/gdpr/forget_user.py --user-id "$(UID)"
