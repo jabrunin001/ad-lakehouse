@@ -1,4 +1,4 @@
-.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint airflow-up airflow-password dags-list dag-medallion gdpr-efficiency gdpr-mor forget-user
+.PHONY: up down topic seed stream query build-silver silver-checks build-gold gold-queries test lint airflow-up airflow-password dags-list dag-medallion gdpr-efficiency gdpr-mor forget-user perf-build perf-bench
 
 up:
 	docker compose up -d
@@ -64,3 +64,9 @@ forget-user: ; docker exec -e PYTHONPATH=/opt/app ad-lakehouse-spark /opt/spark/
 	--conf spark.jars.ivy=/tmp/.ivy2 --conf spark.sql.shuffle.partitions=8 \
 	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
 	/opt/app/gdpr/forget_user.py --user-id "$(UID)"
+
+perf-build: ; docker exec -e PYTHONPATH=/opt/app ad-lakehouse-spark /opt/spark/bin/spark-submit \
+	--conf spark.jars.ivy=/tmp/.ivy2 --conf spark.sql.shuffle.partitions=8 \
+	--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,org.apache.iceberg:iceberg-aws-bundle:1.8.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+	/opt/app/perf/build_tables.py
+perf-bench: ; .venv/bin/python -m perf.benchmark
