@@ -69,6 +69,10 @@ make airflow-up        # start Airflow (standalone) — UI at http://localhost:8
 make airflow-password  # print the generated admin password
 make dags-list         # list the DAGs
 make dag-medallion     # run the silver->gold DAG end to end
+
+make gdpr-efficiency       # demo: bucketed vs unbucketed delete (the ~14.5x win)
+make gdpr-mor              # demo: merge-on-read delete (delete files, data unchanged)
+make forget-user UID=usr-XXXXX  # erase a user across the lakehouse (destructive)
 ```
 
 > **Docker memory:** give Docker **≥ 8 GB** — Airflow plus Spark, Trino, MinIO,
@@ -138,6 +142,29 @@ Docker through a **socket proxy** (not the raw socket), and **disable config
 exposure** — plus an executor (Kubernetes/Celery) that schedules real workers rather
 than `docker exec`.
 
+## Data governance (GDPR)
+
+Right-to-be-forgotten (GDPR Art. 17) erases a user across **bronze → silver →
+gold** and makes them **unrecoverable** — not just hidden. A row-level `DELETE`
+clears every PII table (`bronze.ad_events_raw`, `silver.fact_event`,
+`gold.fact_impression_delivery`), the aggregate gold tables are rebuilt from the
+cleaned silver, and `expire_snapshots` drops the pre-delete snapshots so
+time-travel can't bring the user back. Bronze *must* be deleted, or a later
+silver rebuild resurrects the user.
+
+Two Iceberg techniques make it efficient and verifiable:
+
+- **`bucket(16, user_id)` layout** co-locates a user's rows in one bucket, so the
+  analytical delete prunes to that bucket — measured **~14.5x fewer records** (and
+  8.7x fewer bytes) rewritten than an unbucketed control.
+- **Merge-on-read deletes** write small delete files instead of rewriting data;
+  reads exclude the user immediately and compaction reconciles later.
+
+An audit row in `lh.gdpr.erasure_log` records each erasure for Art. 5(2)
+accountability. Run it on demand via the **`gdpr_delete`** Airflow DAG. Full
+writeup with the measured numbers:
+[`docs/gdpr-right-to-be-forgotten.md`](docs/gdpr-right-to-be-forgotten.md).
+
 ## Design
 
 The full design — data model, the bronze→silver→gold medallion, GDPR
@@ -154,7 +181,7 @@ This repo is built in milestones; each produces working, testable software.
 | 2. Medallion silver + campaign API | FastAPI campaigns, bronze→silver (dedup/late-data, idempotent builds) | ✅ **done** |
 | 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | ✅ **done** |
 | 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | ✅ **done** |
-| 4. GDPR right-to-be-forgotten | `bucket()`-efficient MERGE deletes + merge-on-read equality deletes | planned |
+| 4. GDPR right-to-be-forgotten | `bucket()`-efficient deletes + merge-on-read deletes, snapshot expiry, audit log | ✅ **done** |
 | 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | planned |
 
 ## Repo tour (current)
@@ -165,7 +192,8 @@ This repo is built in milestones; each produces working, testable software.
 | `streaming/` | Spark session builder + Structured Streaming ingest to Iceberg bronze |
 | `api/` | FastAPI campaign-metadata service (http://localhost:8000) |
 | `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`), gold builds (`gold_delivery`, `gold_fill`, `gold_pacing` → `gold.fact_impression_delivery`, `gold.inventory_fill`, `gold.campaign_pacing`) + `run.py` driver |
-| `airflow/` | Airflow DAGs orchestrating the batch builds + Iceberg maintenance (`campaign_pull`, `medallion_build`, `iceberg_maintenance`); each `docker exec`s the Spark container |
+| `airflow/` | Airflow DAGs orchestrating the batch builds + Iceberg maintenance (`campaign_pull`, `medallion_build`, `iceberg_maintenance`) and the on-demand `gdpr_delete`; each `docker exec`s the Spark container |
+| `gdpr/` | Right-to-be-forgotten: `forget_user.py` (erase a user across bronze→silver→gold + snapshot expiry + audit log) and the `efficiency_demo` / `mor_demo` technique demos |
 | `docker-compose.yml`, `docker/` | Redpanda, MinIO, Iceberg REST catalog, Spark, Trino |
 | `trino/` | Analyst SQL against the lakehouse |
 | `tests/` | pytest: generator unit tests + an integration smoke test |

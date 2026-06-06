@@ -31,9 +31,9 @@ def test_dag_file_imports_and_defines_a_dag(dag_file):
     assert dags[0].dag_id  # non-empty id
 
 
-def test_three_dag_files_present():
+def test_dag_files_present():
     assert {p.stem for p in DAG_FILES} == {
-        "campaign_pull_dag", "medallion_dag", "maintenance_dag",
+        "campaign_pull_dag", "medallion_dag", "maintenance_dag", "gdpr_delete_dag",
     }
 
 
