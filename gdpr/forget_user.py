@@ -36,6 +36,12 @@ def forget(spark: SparkSession, user_id: str) -> None:
        the user's impressions (they can't be row-deleted — no user_id column).
     3. expire_snapshots on every touched table so the pre-delete snapshots, which
        still contain the user, are physically removed (true erasure, not logical).
+
+    Boundary conditions: a partial expiry failure surfaces as a raised RuntimeError
+    (the operator/DAG must retry), while the audit row records that erasure was
+    performed. Forgetting the *last* remaining user would trip the gold builds'
+    `assert n > 0` before expiry — a recoverable fail-stop, not corruption — but is
+    not a realistic case on a multi-thousand-user dataset.
     """
     if not _USER_ID_RE.match(user_id):
         raise ValueError(f"refusing unsafe user_id {user_id!r} (expected [A-Za-z0-9_-]+)")
