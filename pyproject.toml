@@ -14,7 +14,7 @@ airflow = ["apache-airflow==2.9.3"]
 [tool.setuptools.packages.find]
 # Explicit include (not auto-discovery): the repo root also holds non-package
 # dirs (trino/, docker/) that would make setuptools' flat-layout heuristic ambiguous.
-include = ["generator*", "api*", "transform*", "streaming*"]
+include = ["generator*", "api*", "transform*", "streaming*", "gdpr*"]
 
 [tool.ruff]
 line-length = 100
