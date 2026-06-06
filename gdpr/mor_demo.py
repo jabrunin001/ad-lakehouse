@@ -43,7 +43,9 @@ def run(spark: SparkSession) -> dict:
     ).collect()[0]["summary"]
     delete_files = spark.sql(f"SELECT count(*) AS c FROM {MOR}.delete_files").collect()[0]["c"]
     data_files_after = spark.sql(f"SELECT count(*) AS c FROM {MOR}.data_files").collect()[0]["c"]
-    remaining = spark.sql(f"SELECT count(*) AS c FROM {MOR} WHERE user_id = '{user_id}'").collect()[0]["c"]
+    remaining = spark.sql(
+        f"SELECT count(*) AS c FROM {MOR} WHERE user_id = '{user_id}'"
+    ).collect()[0]["c"]
 
     added_pos = summary.get("added-position-delete-files", summary.get("added-delete-files", "0"))
     print(f"[mor] user={user_id}")
@@ -59,8 +61,11 @@ def run(spark: SparkSession) -> dict:
     # NOTE: in Iceberg 1.8.1 the rewrite swaps the data but does NOT prune the now-
     # dangling delete-file manifest entries, so `.delete_files` still *counts* them;
     # the honest reconciliation signal is that none of them still references live data.
-    spark.sql("CALL lh.system.rewrite_data_files(table => 'gdpr_demo.fact_event_mor')")
-    live_data = {r["file_path"] for r in spark.sql(f"SELECT file_path FROM {MOR}.data_files").collect()}
+    spark.sql(f"CALL lh.system.rewrite_data_files(table => '{MOR.split('.', 1)[1]}')")
+    live_data = {
+        r["file_path"]
+        for r in spark.sql(f"SELECT file_path FROM {MOR}.data_files").collect()
+    }
     delete_refs = [
         r["referenced_data_file"]
         for r in spark.sql(f"SELECT referenced_data_file FROM {MOR}.delete_files").collect()
