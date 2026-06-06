@@ -50,12 +50,43 @@ def forget(spark: SparkSession, user_id: str) -> None:
     now = spark.sql(
         "SELECT date_format(current_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS t"
     ).collect()[0]["t"]
+    # Attempt every table even if one fails — a mid-loop error must not silently
+    # leave the user's pre-delete snapshots (and thus recoverable PII) on the
+    # remaining tables. Collect failures and raise after attempting all.
+    failed = []
     for table in TOUCHED_TABLES:
-        spark.sql(
-            f"CALL lh.system.expire_snapshots("
-            f"table => '{table}', older_than => TIMESTAMP '{now}', retain_last => 1)"
+        try:
+            spark.sql(
+                f"CALL lh.system.expire_snapshots("
+                f"table => '{table}', older_than => TIMESTAMP '{now}', retain_last => 1)"
+            )
+        except Exception as exc:  # noqa: BLE001 — record and continue
+            failed.append(table)
+            print(f"[forget] WARNING expire_snapshots failed for {table}: {exc}")
+
+    _record_erasure(spark, user_id)
+    if failed:
+        raise RuntimeError(
+            f"[forget] expire_snapshots failed for {failed}; PII may remain recoverable "
+            f"there — re-run forget for {user_id}"
         )
     print(f"[forget] expired snapshots; {user_id} is unrecoverable")
+
+
+def _record_erasure(spark: SparkSession, user_id: str) -> None:
+    """Append an audit row — GDPR accountability (Art. 5(2)/17) means we must be
+    able to demonstrate which user was erased, across which tables, and when. The
+    log itself is a legally-retained record, so it is never a forget() target."""
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS lh.gdpr")
+    spark.sql(
+        "CREATE TABLE IF NOT EXISTS lh.gdpr.erasure_log "
+        "(user_id string, tables string, erased_at timestamp) USING iceberg"
+    )
+    spark.sql(
+        f"INSERT INTO lh.gdpr.erasure_log "
+        f"VALUES ('{user_id}', '{','.join(TOUCHED_TABLES)}', current_timestamp())"
+    )
+    print(f"[forget] audit: logged erasure of {user_id} to gdpr.erasure_log")
 
 
 def main() -> None:
