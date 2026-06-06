@@ -103,7 +103,13 @@ just carries a harmless tail in this version.
   back to that still contains the user. If any table's expiry fails, the driver
   raises so the operator (or the DAG's retry) re-runs — it never silently leaves
   recoverable PII behind.
-- **Accountable.** The audit row in `lh.gdpr.erasure_log` records the erasure.
+- **Accountable.** The audit row in `lh.gdpr.erasure_log` records the erasure —
+  and only the tables that were *fully* erased and snapshot-expired, so a partial
+  run records the truth rather than the intent.
+- **Scope boundary.** Erasure is complete within the Iceberg catalog. Object-store
+  versioning (MinIO/S3), filesystem backups, and downstream copies are a separate
+  control — a real deployment pairs this with a backup/retention policy and
+  `remove_orphan_files` so the expired data files are physically purged from S3.
 
 ## Operations
 

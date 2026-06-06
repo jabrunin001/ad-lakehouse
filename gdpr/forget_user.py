@@ -74,7 +74,11 @@ def forget(spark: SparkSession, user_id: str) -> None:
             failed.append(table)
             print(f"[forget] WARNING expire_snapshots failed for {table}: {exc}")
 
-    _record_erasure(spark, user_id)
+    # Record only the tables that were fully erased AND had their pre-delete
+    # snapshots expired — a table whose expiry failed still holds recoverable PII,
+    # so the audit row must not claim it was erased.
+    fully_erased = [t for t in TOUCHED_TABLES if t not in failed]
+    _record_erasure(spark, user_id, fully_erased)
     if failed:
         raise RuntimeError(
             f"[forget] expire_snapshots failed for {failed}; PII may remain recoverable "
@@ -83,10 +87,12 @@ def forget(spark: SparkSession, user_id: str) -> None:
     print(f"[forget] expired snapshots; {user_id} is unrecoverable")
 
 
-def _record_erasure(spark: SparkSession, user_id: str) -> None:
+def _record_erasure(spark: SparkSession, user_id: str, fully_erased: list[str]) -> None:
     """Append an audit row — GDPR accountability (Art. 5(2)/17) means we must be
     able to demonstrate which user was erased, across which tables, and when. The
-    log itself is a legally-retained record, so it is never a forget() target."""
+    `tables` column lists only the tables fully erased + snapshot-expired (so a
+    partial-failure run records the truth, not the intent). The log itself is a
+    legally-retained record, so it is never a forget() target."""
     spark.sql("CREATE NAMESPACE IF NOT EXISTS lh.gdpr")
     spark.sql(
         "CREATE TABLE IF NOT EXISTS lh.gdpr.erasure_log "
@@ -94,7 +100,7 @@ def _record_erasure(spark: SparkSession, user_id: str) -> None:
     )
     spark.sql(
         f"INSERT INTO lh.gdpr.erasure_log "
-        f"VALUES ('{user_id}', '{','.join(TOUCHED_TABLES)}', current_timestamp())"
+        f"VALUES ('{user_id}', '{','.join(fully_erased)}', current_timestamp())"
     )
     print(f"[forget] audit: logged erasure of {user_id} to gdpr.erasure_log")
 
