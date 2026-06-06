@@ -56,8 +56,13 @@ services:
     image: trinodb/trino:451
     depends_on: [iceberg-rest, minio]
     ports: ["8081:8080"]
+    # Cap the heap (default MaxRAMPercentage=80 grabs ~80% of host RAM and gets
+    # OOM-killed on a laptop also running other Docker projects). A fixed 1.5G heap
+    # + a 2G container limit keeps Trino stable under sustained query load.
+    mem_limit: 2g
     volumes:
       - ./docker/trino/catalog:/etc/trino/catalog
+      - ./docker/trino/jvm.config:/etc/trino/jvm.config
 
   api:
     build:

@@ -76,6 +76,9 @@ make dag-medallion     # run the silver->gold DAG end to end
 make gdpr-efficiency       # demo: bucketed vs unbucketed delete (the ~14.5x win)
 make gdpr-mor              # demo: merge-on-read delete (delete files, data unchanged)
 make forget-user UID=usr-XXXXX  # erase a user across the lakehouse (destructive)
+
+make perf-build           # build the deliberately-bad vs optimized Iceberg tables
+make perf-bench           # benchmark query-time + bytes-scanned, before vs after
 ```
 
 > **Docker memory:** give Docker **≥ 8 GB** — Airflow plus Spark, Trino, MinIO,
@@ -168,6 +171,31 @@ accountability. Run it on demand via the **`gdpr_delete`** Airflow DAG. Full
 writeup with the measured numbers:
 [`docs/gdpr-right-to-be-forgotten.md`](docs/gdpr-right-to-be-forgotten.md).
 
+## Performance
+
+A before/after study on the same ~312k-row dataset in two Iceberg layouts.
+`events_bad` is a deliberately-bad layout — unpartitioned, ~500 tiny files — so
+every query scans the whole pile. `events_optimized` is hidden-partitioned by
+`days(event_ts)` and `bucket(16, user_id)` (176 files), so user- and date-filtered
+queries **prune to only the matching files**.
+
+The headline is **data scanned**, not file size — at this scale the optimized
+table's files are actually *smaller* on average; the win is fewer files plus a
+layout that lets queries skip the irrelevant ones:
+
+- a **user-filtered** query scans about **52 kB instead of 8.45 MB** (~160x less),
+- a **date-range** query scans **288 bytes instead of 10.48 MB** (pruned to almost
+  nothing), because partition pruning skips the non-matching files.
+
+Wall-clock is **~1.4 to 2.2x faster** (median of 5 runs through the Trino CLI).
+This is laptop-scale data, so be honest about it: the absolute times are small and
+the wall-clock gain is modest — the **data-scanned reduction is the real headline**,
+and that is exactly what would dominate at production scale and cost. Full writeup
+with the measured numbers: [`docs/performance.md`](docs/performance.md).
+
+Reproduce: `make perf-build` to build the two tables, then `make perf-bench` to run
+the benchmark.
+
 ## Design
 
 The full design — data model, the bronze→silver→gold medallion, GDPR
@@ -185,7 +213,9 @@ This repo is built in milestones; each produces working, testable software.
 | 2b. Gold data products | gold delivery / inventory fill / campaign **pacing** on top of silver | ✅ **done** |
 | 3. Airflow orchestration | DAGs for the batch builds + Iceberg maintenance | ✅ **done** |
 | 4. GDPR right-to-be-forgotten | `bucket()`-efficient deletes + merge-on-read deletes, snapshot expiry, audit log | ✅ **done** |
-| 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | planned |
+| 5. Performance before/after | deliberately-bad vs optimized pipeline, with measured query-time deltas | ✅ **done** |
+
+All five milestones are complete — the roadmap is **done**.
 
 ## Repo tour (current)
 
@@ -197,6 +227,7 @@ This repo is built in milestones; each produces working, testable software.
 | `transform/` | Spark SQL silver builds (`dim_campaign`, `fact_event`), gold builds (`gold_delivery`, `gold_fill`, `gold_pacing` → `gold.fact_impression_delivery`, `gold.inventory_fill`, `gold.campaign_pacing`) + `run.py` driver |
 | `airflow/` | Airflow DAGs orchestrating the batch builds + Iceberg maintenance (`campaign_pull`, `medallion_build`, `iceberg_maintenance`) and the on-demand `gdpr_delete`; each `docker exec`s the Spark container |
 | `gdpr/` | Right-to-be-forgotten: `forget_user.py` (erase a user across bronze→silver→gold + snapshot expiry + audit log) and the `efficiency_demo` / `mor_demo` technique demos |
+| `perf/` | Performance before/after: `build_tables.py` (deliberately-bad vs hidden-partitioned Iceberg layouts) and `benchmark.py` (query-time + bytes-scanned deltas via Trino) |
 | `docker-compose.yml`, `docker/` | Redpanda, MinIO, Iceberg REST catalog, Spark, Trino |
 | `trino/` | Analyst SQL against the lakehouse |
 | `tests/` | pytest: generator unit tests + an integration smoke test |
