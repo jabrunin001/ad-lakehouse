@@ -7,6 +7,7 @@ actually rewritten. Touches only the gdpr_demo namespace, never production.
 """
 from pyspark.sql import SparkSession
 
+from gdpr.forget_user import _USER_ID_RE
 from streaming.spark_session import build_spark
 
 BUCKETED = "lh.gdpr_demo.fact_event_bucketed"
@@ -20,7 +21,9 @@ def _delete_metrics(spark: SparkSession, table: str, user_id: str) -> dict:
     / `removed-files-size`, the records that lived in those rewritten files via
     `deleted-records`, and the survivors rewritten back via `added-records`. The data
     actually rewritten by the copy-on-write delete is `deleted-records`; the user rows
-    truly removed is `deleted-records` - `added-records`.
+    truly removed is `deleted-records` - `added-records`. `bytes_touched` is
+    `removed-files-size` — the size of the files read and discarded by the rewrite
+    (the read-side cost), not the smaller set of bytes written back.
     """
     spark.sql(f"DELETE FROM {table} WHERE user_id = '{user_id}'")
     row = spark.sql(
@@ -32,7 +35,7 @@ def _delete_metrics(spark: SparkSession, table: str, user_id: str) -> dict:
     return {
         "data_files_rewritten": int(s.get("deleted-data-files", "0")),
         "records_rewritten": records_rewritten,
-        "bytes_rewritten": int(s.get("removed-files-size", "0")),
+        "bytes_touched": int(s.get("removed-files-size", "0")),
         "records_actually_deleted": records_rewritten - records_kept,
     }
 
@@ -52,19 +55,26 @@ def run(spark: SparkSession) -> dict:
     user_id = spark.sql(
         f"SELECT user_id FROM {BUCKETED} GROUP BY user_id ORDER BY count(*) DESC LIMIT 1"
     ).collect()[0]["user_id"]
+    if not _USER_ID_RE.match(user_id):  # consistency with forget_user.py
+        raise ValueError(f"refusing unsafe user_id {user_id!r}")
 
     bucketed = _delete_metrics(spark, BUCKETED, user_id)
     unbucketed = _delete_metrics(spark, UNBUCKETED, user_id)
+    # Both tables are identical copies, so the SAME user must have the SAME true row
+    # count deleted — if not, the two measurements aren't comparing the same operation.
+    assert bucketed["records_actually_deleted"] == unbucketed["records_actually_deleted"], (
+        "bucketed/unbucketed deleted different row counts — measurements not comparable"
+    )
     ratio = (unbucketed["records_rewritten"] / bucketed["records_rewritten"]
              if bucketed["records_rewritten"] else float("nan"))
-    bytes_ratio = (unbucketed["bytes_rewritten"] / bucketed["bytes_rewritten"]
-                   if bucketed["bytes_rewritten"] else float("nan"))
+    bytes_ratio = (unbucketed["bytes_touched"] / bucketed["bytes_touched"]
+                   if bucketed["bytes_touched"] else float("nan"))
 
     print(f"[efficiency] user={user_id} deleted_rows={bucketed['records_actually_deleted']}")
     print(f"[efficiency] bucketed:   {bucketed}")
     print(f"[efficiency] unbucketed: {unbucketed}")
     print(f"[efficiency] records_rewritten ratio (unbucketed / bucketed) = {ratio:.1f}x")
-    print(f"[efficiency] bytes_rewritten ratio   (unbucketed / bucketed) = {bytes_ratio:.1f}x")
+    print(f"[efficiency] bytes_touched ratio     (unbucketed / bucketed) = {bytes_ratio:.1f}x")
     return {"user_id": user_id, "bucketed": bucketed, "unbucketed": unbucketed,
             "ratio": ratio, "bytes_ratio": bytes_ratio}
 
