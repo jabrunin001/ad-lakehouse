@@ -8,6 +8,10 @@ fill, campaign pacing).
 > New here? **[Why this matters (the business value)](docs/business-value.md)** explains
 > what each piece is worth to an ads business. This README is the how; that doc is the why.
 
+**Live demo:** https://jabrunin001.github.io/ad-lakehouse/ — an interactive walk
+through the streaming medallion. Send an event burst and watch silver dedup the
+duplicates and re-partition the late arrivals in real time.
+
 **What runs today (streaming spine + silver + gold):**
 
 ```
