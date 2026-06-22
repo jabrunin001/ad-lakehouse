@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ad-lakehouse — streaming ad-event lakehouse</title>
+<meta name="description" content="Ingest ad-serving events through Kafka and Spark Structured Streaming, land them in Apache Iceberg, and answer the questions an ads business asks while the answer still matters." />
+<meta name="color-scheme" content="dark" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#070a11;
+    --bg-2:#0a0e17;
+    --panel:#0e131e;
+    --panel-2:#121826;
+    --elev:#161d2d;
+    --line:#1d2636;
+    --line-2:#283145;
+    --tx:#e7edf8;          /* primary text ~13:1 */
+    --tx-2:#9aa7bd;        /* secondary ~5.2:1 */
+    --tx-3:#6b7689;        /* tertiary */
+    --live:#3ee37f;        /* run / streaming green */
+    --live-dim:#1f7a48;
+    --cyan:#43c5f4;        /* silver layer */
+    --gold:#f3b748;        /* gold layer */
+    --bronze:#cf8a4f;      /* bronze layer */
+    --violet:#8b80f9;
+    --red:#ff5d6c;
+    --amber:#f6a93b;
+    --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans:"Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    --r:14px; --r-lg:20px;
+    --ring:rgba(62,227,127,.55);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--tx); font-family:var(--sans);
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(820px 480px at 82% -8%, rgba(62,227,127,.10), transparent 60%),
+      radial-gradient(700px 460px at 6% 4%, rgba(67,197,244,.08), transparent 58%),
+      linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size:auto, auto, 44px 44px, 44px 44px;
+    background-position:0 0, 0 0, -1px -1px, -1px -1px;
+  }
+  h1,h2,h3{margin:0; line-height:1.1; letter-spacing:-.02em}
+  p{margin:0}
+  a{color:inherit; text-decoration:none}
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .num{font-variant-numeric:tabular-nums}
+  :focus-visible{outline:2px solid var(--ring); outline-offset:3px; border-radius:6px}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 24px}
+
+  /* nav */
+  header.nav{position:sticky; top:0; z-index:100; background:rgba(7,10,17,.72); backdrop-filter:blur(12px) saturate(160%); border-bottom:1px solid var(--line)}
+  .nav-in{display:flex; align-items:center; gap:30px; height:62px}
+  .brand{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:-.02em}
+  .brand .lg{width:26px; height:26px; flex:0 0 auto}
+  .brand b{color:var(--live)}
+  .nlinks{display:flex; gap:24px; margin-left:6px}
+  .nlinks a{color:var(--tx-2); font-size:14px; font-weight:500; transition:color .15s}
+  .nlinks a:hover{color:var(--tx)}
+  .ncta{margin-left:auto; display:flex; align-items:center; gap:14px}
+  .btn{display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-family:var(--sans); font-weight:600; font-size:14px; border-radius:10px; border:1px solid transparent; padding:10px 16px; min-height:42px; transition:transform .12s ease, background .15s, border-color .15s, box-shadow .15s}
+  .btn:active{transform:translateY(1px)}
+  .btn-live{background:var(--live); color:#04130a; box-shadow:0 0 0 1px rgba(62,227,127,.4), 0 8px 24px -8px rgba(62,227,127,.5)}
+  .btn-live:hover{background:#5cf094; box-shadow:0 0 0 1px rgba(62,227,127,.6), 0 10px 30px -8px rgba(62,227,127,.6)}
+  .btn-ghost{background:var(--panel-2); color:var(--tx); border-color:var(--line-2)}
+  .btn-ghost:hover{border-color:var(--tx-3); background:var(--elev)}
+  .btn-link{color:var(--tx-2); font-weight:600; font-size:14px}
+  .btn-link:hover{color:var(--live)}
+  @media (max-width:900px){ .nlinks{display:none} }
+
+  /* hero */
+  .hero{padding:70px 0 40px}
+  .hero .wrap{display:grid; grid-template-columns:1.02fr .98fr; gap:52px; align-items:center}
+  .eyebrow{display:inline-flex; align-items:center; gap:9px; font-family:var(--mono); font-size:12px; letter-spacing:.06em; color:var(--live); background:rgba(62,227,127,.08); border:1px solid rgba(62,227,127,.25); padding:6px 12px; border-radius:999px}
+  .eyebrow .blink{width:7px; height:7px; border-radius:50%; background:var(--live); box-shadow:0 0 10px var(--live); animation:blink 1.6s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  h1.title{font-size:clamp(33px,4.3vw,50px); font-weight:800; margin-top:20px; letter-spacing:-.03em}
+  h1.title .g{color:var(--live); text-shadow:0 0 26px rgba(62,227,127,.35)}
+  .lede{margin-top:18px; font-size:17.5px; color:var(--tx-2); max-width:40ch}
+  .hero-cta{display:flex; gap:13px; margin-top:28px; flex-wrap:wrap}
+  .chips{display:flex; gap:10px; margin-top:28px; flex-wrap:wrap}
+  .chip{display:flex; flex-direction:column; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 15px}
+  .chip .c-v{font-family:var(--mono); font-weight:700; font-size:18px; color:var(--tx)}
+  .chip .c-v.live{color:var(--live)}
+  .chip .c-l{font-size:11.5px; color:var(--tx-3)}
+  @media (max-width:920px){ .hero .wrap{grid-template-columns:1fr; gap:36px} .hero{padding:46px 0 24px} }
+
+  /* hero pipeline card */
+  .pipe-card{background:linear-gradient(180deg,var(--panel),var(--bg-2)); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:0 30px 80px -30px rgba(0,0,0,.8); overflow:hidden}
+  .pipe-top{display:flex; align-items:center; gap:9px; padding:13px 16px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.015)}
+  .pdot{width:11px;height:11px;border-radius:50%}.pdot.r{background:#ff5f57}.pdot.y{background:#febc2e}.pdot.g{background:#28c840}
+  .pipe-top .t{margin-left:8px; font-family:var(--mono); font-size:12px; color:var(--tx-3)}
+  .pipe-top .thru{margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--live)}
+  .pipe-body{padding:22px 18px}
+  .flow{display:flex; flex-direction:column; gap:0}
+  .stage{display:flex; align-items:center; gap:14px; position:relative; z-index:2}
+  .stage .ic{width:42px; height:42px; flex:0 0 auto; border-radius:11px; display:grid; place-items:center; background:var(--elev); border:1px solid var(--line-2); color:var(--tx-2)}
+  .stage .sx .s-n{font-family:var(--mono); font-weight:600; font-size:13.5px; color:var(--tx)}
+  .stage .sx .s-d{font-size:11.5px; color:var(--tx-3)}
+  .stage .badge{margin-left:auto; font-family:var(--mono); font-size:11px; padding:3px 9px; border-radius:999px; border:1px solid var(--line-2); color:var(--tx-2)}
+  .conn{height:26px; margin-left:21px; width:2px; background:linear-gradient(var(--line-2), var(--line-2)); position:relative; overflow:hidden}
+  .conn .pkt{position:absolute; left:-3px; width:8px; height:8px; border-radius:50%; background:var(--live); box-shadow:0 0 9px var(--live); animation:drop 1.8s linear infinite}
+  .conn .pkt.c2{animation-delay:.6s; background:var(--cyan); box-shadow:0 0 9px var(--cyan)}
+  .conn .pkt.c3{animation-delay:1.15s}
+  @keyframes drop{0%{top:-10px; opacity:0}12%{opacity:1}88%{opacity:1}100%{top:30px; opacity:0}}
+  .stage.bronze .ic{color:var(--bronze); border-color:rgba(207,138,79,.4)}
+  .stage.silver .ic{color:var(--cyan); border-color:rgba(67,197,244,.4)}
+  .stage.gold .ic{color:var(--gold); border-color:rgba(243,183,72,.4)}
+  .stage.live-ic .ic{color:var(--live); border-color:rgba(62,227,127,.4)}
+
+  /* sections */
+  section.band{padding:66px 0; position:relative}
+  .shead{max-width:680px; margin-bottom:34px}
+  .kick{font-family:var(--mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--live)}
+  .shead h2{font-size:clamp(25px,3vw,33px); font-weight:800; margin-top:12px}
+  .shead p{margin-top:13px; font-size:16px; color:var(--tx-2)}
+
+  /* interactive medallion */
+  .console{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); overflow:hidden}
+  .console-bar{display:flex; align-items:center; gap:14px; padding:15px 20px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.015); flex-wrap:wrap}
+  .console-bar .ttl{font-family:var(--mono); font-size:13px; color:var(--tx-2)}
+  .console-bar .ttl b{color:var(--tx)}
+  .live-tag{display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11.5px; color:var(--live); border:1px solid rgba(62,227,127,.3); background:rgba(62,227,127,.07); padding:4px 10px; border-radius:999px}
+  .live-tag .blink{width:6px;height:6px;border-radius:50%;background:var(--live);box-shadow:0 0 8px var(--live);animation:blink 1.6s infinite}
+  .med-grid{display:grid; grid-template-columns:repeat(3,1fr) 1.15fr; gap:0}
+  @media (max-width:980px){ .med-grid{grid-template-columns:1fr 1fr} }
+  @media (max-width:620px){ .med-grid{grid-template-columns:1fr} }
+  .layer{padding:22px 20px; border-right:1px solid var(--line); position:relative}
+  .layer:last-child{border-right:none}
+  @media (max-width:980px){ .layer{border-bottom:1px solid var(--line)} }
+  .layer .l-top{display:flex; align-items:center; gap:9px}
+  .layer .tag{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; font-weight:600}
+  .tag.bronze{color:var(--bronze); background:rgba(207,138,79,.12)}
+  .tag.silver{color:var(--cyan); background:rgba(67,197,244,.12)}
+  .tag.gold{color:var(--gold); background:rgba(243,183,72,.12)}
+  .layer .l-tbl{font-family:var(--mono); font-size:11.5px; color:var(--tx-3); margin-top:3px}
+  .layer .big{font-family:var(--mono); font-weight:700; font-size:34px; margin-top:16px; letter-spacing:-.02em; transition:color .2s}
+  .layer .big.flash{color:var(--live)}
+  .layer .l-sub{font-size:12px; color:var(--tx-2); margin-top:6px; min-height:34px}
+  .layer .l-sub b{color:var(--tx)}
+  .layer .l-sub .rm{color:var(--red)} .layer .l-sub .lt{color:var(--amber)}
+  .feed-layer{padding:18px 18px}
+  .feed-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
+  .feed-head .fh{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--tx-3)}
+  .feed{font-family:var(--mono); font-size:11.5px; height:178px; overflow:hidden; display:flex; flex-direction:column; gap:5px; -webkit-mask-image:linear-gradient(180deg,#000 78%,transparent); mask-image:linear-gradient(180deg,#000 78%,transparent)}
+  .ev{display:flex; align-items:center; gap:8px; color:var(--tx-2); animation:slideIn .3s ease}
+  @keyframes slideIn{from{opacity:0; transform:translateY(-6px)}to{opacity:1; transform:none}}
+  .ev .id{color:var(--tx-3)}
+  .ev .ty{color:var(--tx)}
+  .ev .t{margin-left:auto; font-size:10px; padding:1px 6px; border-radius:5px}
+  .ev .t.ok{color:var(--live); background:rgba(62,227,127,.1)}
+  .ev .t.dup{color:var(--red); background:rgba(255,93,108,.12)}
+  .ev .t.late{color:var(--amber); background:rgba(246,169,59,.12)}
+  .ctl-row{display:flex; align-items:center; gap:14px; padding:16px 20px; border-top:1px solid var(--line); background:rgba(255,255,255,.012); flex-wrap:wrap}
+  .ctl-row .hint{font-size:12.5px; color:var(--tx-3)}
+
+  /* data products */
+  .prods{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+  @media (max-width:900px){ .prods{grid-template-columns:1fr} }
+  .prod{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:22px; transition:border-color .2s, transform .2s}
+  .prod:hover{border-color:var(--line-2); transform:translateY(-3px)}
+  .prod .p-ic{width:40px; height:40px; border-radius:10px; display:grid; place-items:center; background:var(--elev); border:1px solid var(--line-2); color:var(--live)}
+  .prod h3{font-size:17px; font-weight:700; margin:16px 0 7px}
+  .prod .tbl-name{font-family:var(--mono); font-size:11.5px; color:var(--tx-3); margin-bottom:12px}
+  .prod p{font-size:13.5px; color:var(--tx-2)}
+  /* pacing bars */
+  .pace{display:flex; flex-direction:column; gap:9px; margin:6px 0 14px}
+  .pace .pb{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:11.5px}
+  .pace .pb .lab{width:74px; color:var(--tx-2)}
+  .pace .pb .bar{flex:1; height:8px; border-radius:5px; background:var(--elev); overflow:hidden}
+  .pace .pb .bar i{display:block; height:100%; border-radius:5px}
+  .pace .pb .v{width:30px; text-align:right; color:var(--tx)}
+  /* fill radial */
+  .radial{width:120px; height:120px; margin:6px auto 14px; border-radius:50%; display:grid; place-items:center; position:relative;
+    background:conic-gradient(var(--live) 0 70%, var(--elev) 70% 100%)}
+  .radial::before{content:""; position:absolute; inset:11px; border-radius:50%; background:var(--panel)}
+  .radial .rv{position:relative; font-family:var(--mono); font-weight:700; font-size:24px; color:var(--tx)}
+  .radial .rl{position:relative; font-size:10px; color:var(--tx-3); margin-top:-2px}
+  /* delivery spark */
+  .spark{margin:6px 0 14px}
+  .deliv-bar{height:9px; border-radius:5px; background:var(--elev); overflow:hidden; margin-top:8px}
+  .deliv-bar i{display:block; height:100%; background:linear-gradient(90deg,var(--cyan),var(--live)); border-radius:5px}
+  .deliv-meta{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--tx-3); margin-top:6px}
+
+  /* gdpr highlight */
+  .feature{display:grid; grid-template-columns:1fr 1fr; gap:30px; align-items:center; background:linear-gradient(135deg, rgba(139,128,249,.07), rgba(67,197,244,.05)); border:1px solid var(--line); border-radius:var(--r-lg); padding:36px}
+  @media (max-width:860px){ .feature{grid-template-columns:1fr; padding:26px} }
+  .feature h2{font-size:clamp(23px,2.6vw,30px); font-weight:800}
+  .feature p{margin-top:14px; color:var(--tx-2); font-size:15.5px}
+  .feature .stat{display:flex; align-items:baseline; gap:12px; margin-top:22px}
+  .feature .stat .n{font-family:var(--mono); font-weight:700; font-size:54px; color:var(--violet); text-shadow:0 0 30px rgba(139,128,249,.35); letter-spacing:-.03em}
+  .feature .stat .nx{font-size:14px; color:var(--tx-2); max-width:24ch}
+  .delete-viz{background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r); padding:18px; font-family:var(--mono); font-size:12px}
+  .dv-row{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+  .dv-row:last-child{margin-bottom:0}
+  .dv-row .dl{width:62px; color:var(--tx-3); font-size:11px}
+  .dv-cells{display:flex; gap:3px; flex-wrap:wrap; flex:1}
+  .cell{width:11px; height:11px; border-radius:2px; background:var(--elev)}
+  .cell.hit{background:var(--red)}
+  .cell.hit.few{background:var(--violet)}
+  .dv-row .dn{font-size:11px; color:var(--tx-2); width:78px; text-align:right}
+
+  /* query */
+  .term{background:#06080d; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; font-family:var(--mono); font-size:13px}
+  .term-bar{display:flex; align-items:center; gap:8px; padding:11px 15px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.015)}
+  .term-bar .t{margin-left:8px; font-size:12px; color:var(--tx-3)}
+  .term-body{padding:18px; overflow-x:auto; line-height:1.7}
+  .term-body .kw{color:var(--violet)} .term-body .fn{color:var(--cyan)} .term-body .st{color:var(--gold)}
+  .term-body .pmt{color:var(--live)} .term-body .cm{color:var(--tx-3)}
+  .term-body .hr{color:var(--line-2)}
+  .term-body .b{color:var(--bronze)} .term-body .ok{color:var(--live)} .term-body .behind{color:var(--red)} .term-body .ahead{color:var(--cyan)}
+
+  /* stack strip */
+  .stack{display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:8px}
+  .stack .s{font-family:var(--mono); font-size:13px; color:var(--tx-2); border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:9px 16px}
+  .stack .s b{color:var(--tx)}
+
+  /* cta */
+  .final{position:relative; overflow:hidden; text-align:center; border:1px solid var(--line); border-radius:var(--r-lg); padding:54px 30px; background:radial-gradient(700px 300px at 50% -20%, rgba(62,227,127,.14), transparent 60%), var(--panel)}
+  .final h2{font-size:clamp(26px,3.2vw,38px); font-weight:800; max-width:20ch; margin:0 auto}
+  .final p{margin:14px auto 0; color:var(--tx-2); font-size:16px; max-width:54ch}
+  .final .cmd{display:inline-flex; align-items:center; gap:10px; font-family:var(--mono); font-size:13px; color:var(--tx); background:var(--bg-2); border:1px solid var(--line-2); border-radius:10px; padding:12px 18px; margin-top:24px}
+  .final .cmd .pmt{color:var(--live)}
+  .final .row{display:flex; gap:13px; justify-content:center; margin-top:24px; flex-wrap:wrap}
+
+  footer{border-top:1px solid var(--line); margin-top:30px; padding:34px 0 56px}
+  .f-in{display:flex; align-items:center; gap:16px; flex-wrap:wrap; color:var(--tx-3); font-size:13px}
+  .f-in .disc{margin-left:auto; max-width:48ch; text-align:right}
+  @media (max-width:680px){ .f-in .disc{text-align:left; margin-left:0} }
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important; scroll-behavior:auto !important; transition-duration:.001ms !important}
+    .conn .pkt{display:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="ad-lakehouse home">
+      <svg class="lg" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="#0e131e" stroke="#1e2636"/>
+        <path d="M7 21l5-9 4 6 3-4 6 7" stroke="#3ee37f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="12" cy="12" r="1.6" fill="#3ee37f"/>
+      </svg>
+      <span>ad&#8209;<b>lakehouse</b></span>
+    </a>
+    <nav class="nlinks" aria-label="Primary">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#products">Data products</a>
+      <a href="#gdpr">GDPR deletes</a>
+      <a href="#query">Query</a>
+    </nav>
+    <div class="ncta">
+      <a class="btn-link" href="#pipeline">Run the demo</a>
+      <a class="btn btn-ghost" href="https://github.com/jabrunin001/ad-lakehouse" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 00-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 015.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.05.78 2.12v3.14c0 .31.21.67.8.56A11.5 11.5 0 0012 .5z"/></svg>
+        Source
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow"><span class="blink"></span>STREAMING AD-EVENT LAKEHOUSE</span>
+      <h1 class="title">Answer the questions an ads business asks <span class="g">while the answer still matters.</span></h1>
+      <p class="lede">Ingest ad-serving events through Kafka and Spark Structured Streaming, land them raw in Apache Iceberg, and refine them into clean data products: delivery, inventory fill, and campaign pacing. Fresh enough to fix a flight mid-run, not just report on it next month.</p>
+      <div class="hero-cta">
+        <a class="btn btn-live" href="#pipeline">Run the pipeline demo</a>
+        <a class="btn btn-ghost" href="#products">See the data products</a>
+      </div>
+      <div class="chips">
+        <div class="chip"><span class="c-v live">~70%</span><span class="c-l">inventory fill rate</span></div>
+        <div class="chip"><span class="c-v">15×</span><span class="c-l">cheaper GDPR deletes</span></div>
+        <div class="chip"><span class="c-v">sub-sec</span><span class="c-l">streaming freshness</span></div>
+      </div>
+    </div>
+
+    <!-- live pipeline -->
+    <div class="pipe-card" aria-label="Live streaming pipeline">
+      <div class="pipe-top">
+        <span class="pdot r"></span><span class="pdot y"></span><span class="pdot g"></span>
+        <span class="t">spark structured streaming · topic: ad_events</span>
+        <span class="thru" id="thru">— ev/s</span>
+      </div>
+      <div class="pipe-body">
+        <div class="flow">
+          <div class="stage live-ic">
+            <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-7m5 7V8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+            <span class="sx"><span class="s-n">generator</span><span class="s-d">ad_request · impression · quartile</span></span>
+            <span class="badge">Python</span>
+          </div>
+          <div class="conn"><span class="pkt"></span><span class="pkt c2"></span><span class="pkt c3"></span></div>
+          <div class="stage live-ic">
+            <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="12" r="2.4" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="6" r="2.4" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="18" r="2.4" stroke="currentColor" stroke-width="1.8"/><path d="M8 11l8-4M8 13l8 4" stroke="currentColor" stroke-width="1.8"/></svg></span>
+            <span class="sx"><span class="s-n">Redpanda (Kafka)</span><span class="s-d">durable event log</span></span>
+            <span class="badge">topic</span>
+          </div>
+          <div class="conn"><span class="pkt"></span><span class="pkt c2"></span><span class="pkt c3"></span></div>
+          <div class="stage live-ic">
+            <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>
+            <span class="sx"><span class="s-n">Spark Streaming</span><span class="s-d">checkpointed ingest</span></span>
+            <span class="badge">exactly-once</span>
+          </div>
+          <div class="conn"><span class="pkt"></span><span class="pkt c2"></span><span class="pkt c3"></span></div>
+          <div class="stage bronze">
+            <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" stroke="currentColor" stroke-width="1.8"/></svg></span>
+            <span class="sx"><span class="s-n">Iceberg · medallion</span><span class="s-d">bronze → silver → gold</span></span>
+            <span class="badge">on MinIO/S3</span>
+          </div>
+          <div class="conn"><span class="pkt"></span><span class="pkt c2"></span><span class="pkt c3"></span></div>
+          <div class="stage live-ic">
+            <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="18" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg></span>
+            <span class="sx"><span class="s-n">Trino</span><span class="s-d">SQL on the same tables Spark writes</span></span>
+            <span class="badge">queries</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INTERACTIVE MEDALLION -->
+<section class="band" id="pipeline">
+  <div class="wrap">
+    <div class="shead">
+      <div class="kick">Medallion in motion</div>
+      <h2>Raw events in. Trustworthy tables out.</h2>
+      <p>Real event streams carry duplicates and late arrivals. Bronze keeps everything raw and append-only; silver deduplicates on <span class="mono" style="color:var(--cyan)">event_id</span> and lands late events in their true partition; gold reshapes that into analyst-ready products. Send a burst and watch the layers do their job.</p>
+    </div>
+
+    <div class="console">
+      <div class="console-bar">
+        <span class="ttl">stream: <b>ad_events</b> → iceberg medallion</span>
+        <span class="live-tag" style="margin-left:auto"><span class="blink"></span>LIVE</span>
+      </div>
+
+      <div class="med-grid">
+        <div class="layer">
+          <div class="l-top"><span class="tag bronze">Bronze</span></div>
+          <div class="l-tbl">bronze.ad_events_raw</div>
+          <div class="big mono" id="b-count">0</div>
+          <div class="l-sub">Every event, raw and append-only. <b id="b-note">nothing dropped</b></div>
+        </div>
+        <div class="layer">
+          <div class="l-top"><span class="tag silver">Silver</span></div>
+          <div class="l-tbl">silver.fact_event</div>
+          <div class="big mono" id="s-count">0</div>
+          <div class="l-sub"><span class="rm" id="s-dup">0 duplicates</span> removed · <span class="lt" id="s-late">0 late</span> re-partitioned</div>
+        </div>
+        <div class="layer">
+          <div class="l-top"><span class="tag gold">Gold</span></div>
+          <div class="l-tbl">gold.campaign_pacing</div>
+          <div class="big mono" id="g-count">0</div>
+          <div class="l-sub">campaigns labeled <b>ahead / on&nbsp;track / behind</b></div>
+        </div>
+        <div class="layer feed-layer">
+          <div class="feed-head"><span class="fh">event feed</span><span class="fh mono" id="feed-rate">idle</span></div>
+          <div class="feed" id="feed" aria-live="off"></div>
+        </div>
+      </div>
+
+      <div class="ctl-row">
+        <button class="btn btn-live" id="burst">Generate 500-event burst</button>
+        <button class="btn btn-ghost" id="toggleStream" aria-pressed="true">Pause stream</button>
+        <span class="hint">Bursts inject ~12% duplicates and ~6% late events — exactly what silver is built to clean.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DATA PRODUCTS -->
+<section class="band" id="products" style="padding-top:8px">
+  <div class="wrap">
+    <div class="shead">
+      <div class="kick">Gold layer</div>
+      <h2>Three products an ads team reads every day</h2>
+      <p>Each is a tested, idempotent Spark SQL build (<span class="mono">CREATE OR REPLACE</span>) over the clean silver layer — queryable in Trino the moment it lands.</p>
+    </div>
+    <div class="prods">
+      <div class="prod">
+        <span class="p-ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 7h4v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <h3>Campaign pacing</h3>
+        <div class="tbl-name">gold.campaign_pacing</div>
+        <div class="pace">
+          <div class="pb"><span class="lab">Ahead</span><span class="bar"><i style="width:24%; background:var(--cyan)"></i></span><span class="v">5</span></div>
+          <div class="pb"><span class="lab">On track</span><span class="bar"><i style="width:62%; background:var(--live)"></i></span><span class="v">13</span></div>
+          <div class="pb"><span class="lab">Behind</span><span class="bar"><i style="width:14%; background:var(--red)"></i></span><span class="v">3</span></div>
+        </div>
+        <p>Compares actual delivery against a steady burn for each day of the flight. Catch under-delivery on day eight, not in next month's report.</p>
+      </div>
+
+      <div class="prod">
+        <span class="p-ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M3 9h18M9 21V9" stroke="currentColor" stroke-width="2"/></svg></span>
+        <h3>Inventory fill</h3>
+        <div class="tbl-name">gold.inventory_fill</div>
+        <div class="radial" role="img" aria-label="Overall fill rate 70 percent"><span class="rv">70%</span><span class="rl">fill rate</span></div>
+        <p>Fill rate by campaign, placement, and hour. Every unfilled ad request is money that walked out the door — so you want it broken down, not averaged away.</p>
+      </div>
+
+      <div class="prod">
+        <span class="p-ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M5 12l7-7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <h3>Impression delivery</h3>
+        <div class="tbl-name">gold.fact_impression_delivery</div>
+        <div class="spark">
+          <div class="deliv-bar"><i style="width:83%"></i></div>
+          <div class="deliv-meta"><span>83,120 delivered</span><span>goal 100,000</span></div>
+        </div>
+        <p>Deduplicated impressions joined to campaign metadata, partitioned for fast flight-to-date roll-ups. The spine every pacing and fill number is built on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GDPR FEATURE -->
+<section class="band" id="gdpr">
+  <div class="wrap">
+    <div class="feature">
+      <div>
+        <div class="kick">Privacy as an operational cost</div>
+        <h2>Delete one user out of millions — and prove it.</h2>
+        <p>GDPR fines run to 4% of global revenue, so "we can't actually delete this person" reaches the board. The data is laid out so a user lives in one predictable slice of it, instead of scattered across every file.</p>
+        <div class="stat">
+          <span class="n">15×</span>
+          <span class="nx">less data rewritten per deletion than a naive layout, measured on the demo — plus an audit record of what was erased and when.</span>
+        </div>
+      </div>
+      <div class="delete-viz" aria-hidden="true">
+        <div class="dv-row">
+          <span class="dl">naive</span>
+          <span class="dv-cells" id="dv-naive"></span>
+          <span class="dn">~all files</span>
+        </div>
+        <div class="dv-row">
+          <span class="dl">partitioned</span>
+          <span class="dv-cells" id="dv-part"></span>
+          <span class="dn">1 slice</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- QUERY -->
+<section class="band" id="query" style="padding-top:8px">
+  <div class="wrap">
+    <div class="shead">
+      <div class="kick">Open table format</div>
+      <h2>Point any engine at one copy of the data</h2>
+      <p>Storage, catalog, and compute stay separate on Apache Iceberg. Trino queries the exact tables Spark writes — no proprietary warehouse holding your data hostage, no re-copying to swap engines.</p>
+    </div>
+    <div class="term">
+      <div class="term-bar"><span class="pdot r"></span><span class="pdot y"></span><span class="pdot g"></span><span class="t">trino:gold</span></div>
+      <div class="term-body"><span class="pmt">trino&gt;</span> <span class="kw">SELECT</span> campaign_id, pace_label, <span class="fn">round</span>(pct_delivered, 2) <span class="kw">AS</span> pct
+       <span class="kw">FROM</span> gold.campaign_pacing
+       <span class="kw">WHERE</span> flight_date = <span class="fn">current_date</span>
+       <span class="kw">ORDER BY</span> pct <span class="kw">ASC</span> <span class="kw">LIMIT</span> <span class="st">4</span>;
+
+<span class="hr"> campaign_id | pace_label | pct </span>
+<span class="hr">-------------+------------+------</span>
+ cmp_018     | <span class="behind">BEHIND  </span>   | 0.61
+ cmp_007     | <span class="behind">BEHIND  </span>   | 0.74
+ cmp_004     | <span class="ok">ON_TRACK</span>   | 0.97
+ cmp_021     | <span class="ahead">AHEAD   </span>   | 1.18
+<span class="cm">(4 rows · 0.21s · scanned 1 partition)</span></div>
+    </div>
+    <div class="stack">
+      <span class="s"><b>Redpanda</b> Kafka</span>
+      <span class="s"><b>Spark</b> Structured Streaming</span>
+      <span class="s"><b>Apache Iceberg</b> REST catalog</span>
+      <span class="s"><b>Trino</b> query engine</span>
+      <span class="s"><b>MinIO</b> S3 storage</span>
+      <span class="s"><b>FastAPI</b> campaigns :8000</span>
+      <span class="s"><b>Airflow</b> orchestration</span>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="band" style="padding-top:8px">
+  <div class="wrap">
+    <div class="final">
+      <h2>Spin up the whole lakehouse on a laptop.</h2>
+      <p>Synthetic data, real design: the partitioning that makes deletes cheap, the streaming path that keeps data fresh, the tested medallion layers, and the open table format underneath.</p>
+      <div class="cmd"><span class="pmt">$</span> make up &amp;&amp; make stream &amp;&amp; make gold</div>
+      <div class="row">
+        <a class="btn btn-live" href="https://github.com/jabrunin001/ad-lakehouse" target="_blank" rel="noopener">View source on GitHub</a>
+        <a class="btn btn-ghost" href="#pipeline">Replay the demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap f-in">
+    <a class="brand" href="#top"><svg class="lg" viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#0e131e" stroke="#1e2636"/><path d="M7 21l5-9 4 6 3-4 6 7" stroke="#3ee37f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>ad&#8209;<b>lakehouse</b></span></a>
+    <a class="btn-link" href="https://github.com/jabrunin001/ad-lakehouse" target="_blank" rel="noopener">View source on GitHub →</a>
+    <span class="disc">Sample demo. Counters and feed are simulated to illustrate the medallion flow; the streaming spine, silver dedup, gold products, and GDPR layout are real and shipped in this repository.</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var EV_TYPES = ["ad_request","impression","quartile_25","quartile_50","quartile_75","complete"];
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var st = { bronze:0, silver:0, dup:0, late:0, gold:18 };
+  var streaming = true;
+  var seq = 1000;
+
+  function fmt(n){ return n.toLocaleString("en-US"); }
+
+  function setBig(el, val, flash){
+    el.textContent = fmt(val);
+    if(flash){ el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 260); }
+  }
+
+  function paint(flash){
+    setBig($("b-count"), st.bronze, flash);
+    setBig($("s-count"), st.silver, flash);
+    $("g-count").textContent = fmt(st.gold);
+    $("s-dup").textContent = fmt(st.dup) + " duplicates";
+    $("s-late").textContent = fmt(st.late) + " late";
+    $("b-note").textContent = st.bronze ? fmt(st.bronze) + " rows, nothing dropped" : "nothing dropped";
+  }
+
+  var rid = 0;
+  function hex(n){ var s=""; for(var i=0;i<n;i++) s+="0123456789abcdef"[Math.floor((seq*9301+49297+i*233)%233280/233280*16)%16]; return s; }
+  function nextId(){ seq++; return "evt_" + (seq*2654435761 % 0xfffff).toString(16).padStart(5,"0"); }
+
+  function addFeed(type, tag){
+    var feed = $("feed");
+    var row = document.createElement("div");
+    row.className = "ev";
+    var cmp = "cmp_" + String(((seq*7)%24)+1).padStart(3,"0");
+    var cls = tag==="DUP" ? "dup" : tag==="LATE" ? "late" : "ok";
+    row.innerHTML = '<span class="id">'+nextId()+'</span><span class="ty">'+type+'</span><span class="id">'+cmp+'</span><span class="t '+cls+'">'+tag+'</span>';
+    feed.insertBefore(row, feed.firstChild);
+    while(feed.childElementCount > 9) feed.removeChild(feed.lastChild);
+  }
+
+  // one streamed event
+  function tick(){
+    if(!streaming) return;
+    var r = Math.random();
+    var tag = r < 0.10 ? "DUP" : r < 0.16 ? "LATE" : "OK";
+    var type = EV_TYPES[Math.floor(Math.random()*EV_TYPES.length)];
+    st.bronze += 1;
+    if(tag === "DUP"){ st.dup += 1; }            // dropped at silver
+    else { st.silver += 1; if(tag==="LATE") st.late += 1; }
+    addFeed(type, tag);
+    paint(false);
+  }
+
+  // burst of N
+  function burst(){
+    var N = 500;
+    var dup = Math.round(N * 0.12), late = Math.round(N * 0.06);
+    st.bronze += N;
+    st.dup += dup;
+    st.late += late;
+    st.silver += (N - dup);
+    st.gold += 1; // pacing rebuild
+    // sample rows into the feed
+    addFeed("impression","OK");
+    addFeed("ad_request","DUP");
+    addFeed("quartile_50","LATE");
+    paint(true);
+    pulseRate(N);
+  }
+
+  var rateTimer = null;
+  function pulseRate(n){
+    var fr = $("feed-rate");
+    fr.textContent = "+" + fmt(n) + " ingested";
+    fr.style.color = "var(--live)";
+    clearTimeout(rateTimer);
+    rateTimer = setTimeout(function(){ fr.textContent = streaming ? "streaming…" : "paused"; fr.style.color = ""; }, 1800);
+  }
+
+  // throughput readout in hero
+  function thru(){
+    var v = streaming ? (1800 + Math.floor(Math.random()*900)) : 0;
+    $("thru").textContent = streaming ? fmt(v) + " ev/s" : "paused";
+  }
+
+  // GDPR delete viz cells
+  function buildCells(){
+    var naive = $("dv-naive"), part = $("dv-part");
+    for(var i=0;i<45;i++){
+      var a = document.createElement("span"); a.className = "cell hit"; naive.appendChild(a);
+      var b = document.createElement("span"); b.className = "cell" + (i===22 ? " hit few" : ""); part.appendChild(b);
+    }
+  }
+
+  // wire controls
+  $("burst").addEventListener("click", burst);
+  $("toggleStream").addEventListener("click", function(){
+    streaming = !streaming;
+    this.textContent = streaming ? "Pause stream" : "Resume stream";
+    this.setAttribute("aria-pressed", String(streaming));
+    $("feed-rate").textContent = streaming ? "streaming…" : "paused";
+    thru();
+  });
+
+  buildCells();
+  paint(false);
+  thru();
+  $("feed-rate").textContent = "streaming…";
+
+  if(!reduce){
+    setInterval(tick, 900);
+    setInterval(thru, 1500);
+  } else {
+    // reduced motion: seed a representative snapshot, no live ticking
+    st.bronze = 8420; st.silver = 7409; st.dup = 1011; st.late = 506; st.gold = 21;
+    paint(false);
+    $("feed-rate").textContent = "paused (reduced motion)";
+    streaming = false;
+    $("toggleStream").textContent = "Resume stream";
+  }
+})();
+</script>
+</body>
+</html>
